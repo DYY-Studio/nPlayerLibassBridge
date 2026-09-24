@@ -1163,3 +1163,33 @@ Co-authored-by: Codex <codex@openai.com>"
 
 **未改动**：`bridge/`（桥源码与导出表）、`npabridge/payload.py`（载荷生成与四态状态机）、`npabridge/verify.py` 的检查项本身、`deps/`（pin 与交叉编译）。`dist/` 里上一轮 4 变体产物与 `smoke.ipa` 保留未清理（设备验收证据）。
 
+## 最终评审与修复（fresh reviewer）
+
+对整个实现范围（`28fcfbc..eb95188`）做了一轮独立上下文评审，结论 **Critical 0 / Important 2 / Minor 5**，另有若干"declined to judge"项由我裁决。修复后追加两处提交，并再次验收。
+
+**已修（Important/Minor）**
+
+1. `Frameworks` 位置为文件时给出具名错误（原为 `FileExistsError`），测试 `test_frameworks_path_that_is_a_file_is_rejected`。
+2. `-o` 指向 bridge dylib 时拒绝，避免用 IPA 覆盖用户的 dylib，测试 `test_refuses_to_overwrite_the_bridge_dylib`。
+3. `_reject_encrypted` 拆开"无 `LC_ENCRYPTION_INFO`"与"crypt_id != 0"两种诊断。
+4. `package_ipa` 自建的暂存目录加 `npa-patch-` 前缀并在 `finally` 清理，删除已死的 `WORK_ROOT`；测试 `test_default_scratch_directory_is_cleaned_up`（隔离 TMPDIR 后断言目录为空，修复前为 RED）。
+5. wheel 改为 `only-include = ["npabridge", "manifests", "bridge/npa_ass_bridge.c"]`，让安装态的库能找到运行期数据文件。
+6. README：补 `libkeystone.dylib` 资产、Linux 下的 ldid 说明、两条新错误信息；`dev/README.md` 的发布清单改为发布两个资产。
+
+**已拒绝（附理由）**
+
+- **给 bridge 绑定版本/哈希**：判定 dylib 的 libass 身份需要新增第 16 个导出或内嵌版本字段，这会改变已通过设备验收的交付二进制；计划本身也已明确拒绝哈希 pin（每次重建的静态归档元数据会变）。缓解措施保留：发布清单要求随资产公布 SHA-256，`npa-patch` 的输出里也打印实际使用的 bridge 哈希；README 的排障表指向"使用匹配版本的 release dylib"。**若判断错误**：用户拿结构兼容但不同版本的 dylib 会得到可正常工作、但文件名标注 `libass0.17.5` 的产物。
+
+**评审未发现、由本轮验收暴露的 Critical 缺口**
+
+patch 流程需要用 host Keystone 汇编器编码载荷，而它原本只在 `build/host/libkeystone.dylib`（构建产物）里存在——干净 clone 下 `uv run npa-patch` **完全无法工作**。已把它移到仓库根 `libkeystone.dylib`（`make bootstrap` 的产物位置，也是 Release 资产落点），并在缺失时给出明确指引。
+
+**修复后验收（含真实用户路径）**
+
+| 检查 | 结果 |
+| --- | --- |
+| 干净 clone + 仅放两个 Release 资产 + `uv run npa-patch` | 成功，`checks_passed` 21，main `19d3447193bcd66e…`（与设备验收产物逐字节一致） |
+| `uv run pytest -q` | 44 passed |
+| `uv run pytest dev/tests -q` | 7 passed |
+| `env DEVELOPER_DIR=/nonexistent` 端到端 | 成功，产物字节一致（patch 阶段不依赖 Xcode） |
+| 安装态 wheel 端到端 | 不适用：README 已声明需在仓库 checkout 内运行；wheel 内含运行期数据，缺的只是平台相关的汇编器二进制 |
