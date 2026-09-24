@@ -1135,7 +1135,7 @@ Co-authored-by: Codex <codex@openai.com>"
 
 ## 执行记录（Task 1–8 已落地）
 
-按计划逐 Task 实现，每个 Task 一个 Commit（`main` 分支，用户明确同意）。与计划的偏差全部记在 `.superpowers/sdd/2026-09-25-public-patch-toolchain/progress.md` 的 `Ruling:` 行，摘要如下。
+按计划逐 Task 实现，每个 Task 一个 Commit（`main` 分支，用户明确同意）。执行期偏离计划的地方都做了裁决（`Ruling`），与最终评审的处置一起记录在本节与「最终评审与修复」一节。
 
 **交付物与验收锚点**（都是实际命令的输出，不是推断）：
 
