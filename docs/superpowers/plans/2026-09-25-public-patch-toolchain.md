@@ -688,8 +688,7 @@ def patch_ipa(source, output, bridge, manifests, work=None) -> PatchResult:
     contract = verify.verify_bridge(bridge, manifest)
     contract.require()
 
-    macho.nop_only_main(source_main, work / "main-nop")
-    macho.phase_a(work / "main-nop", work / "main-phase-a", manifest)
+    macho.phase_a(source_main, work / "main-phase-a", manifest)
     macho.phase_b(work / "main-phase-a", work / "main-phase-b", manifest)
 
     temporary = output.with_name(f".tmp-{output.name}")
@@ -1131,4 +1130,6 @@ Co-authored-by: Codex <codex@openai.com>"
 保留（用户选择维持原方案）：`tests/support.py` + `NPA_SOURCE_IPA`、把 `publish_app_bundle`/`inspect_app_ipa` 搬到 `dev/smoke_package.py`。
 
 修正的计划缺陷：坏 bridge 测试改用从源 IPA 取出的 main（`/usr/lib/libSystem.B.dylib` 是 fat 二进制，会先在 `bridge.macho` 失败）；`package_ipa` 的暂存目录改为调用方传入的 `work`（缺省 `tempfile.mkdtemp`），不再把临时文件写回仓库。
+
+执行期发现并修正（Task 4）：`phase_b` 自身在改写前校验原字并写入两处 NOP，`nop_only_main` 只服务已删除的 `baseline` 变体 → 删除该函数；patch 流程为 clean main → `phase_a` → `phase_b`（原计划多插了一步 `nop_only_main`，会因 NOP 站点校验失败而中断）。
 

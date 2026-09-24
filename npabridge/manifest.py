@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,4 +87,22 @@ def load_manifest(path: Path) -> Manifest:
             ignored_argument_register=callback["ignored_argument_register"],
         ),
         apis=apis,
+    )
+
+
+def select_manifest(directory: Path, main: Path) -> Manifest:
+    """Pick the manifest whose frozen main hash matches this executable."""
+
+    digest = hashlib.sha256(Path(main).read_bytes()).hexdigest()
+    supported = []
+    for path in sorted(Path(directory).glob("*.json")):
+        manifest = load_manifest(path)
+        supported.append(manifest.app_version)
+        if manifest.main_sha256 == digest:
+            return manifest
+    raise ValueError(
+        "no manifest matches this main executable\n"
+        f"  input sha256: {digest}\n"
+        f"  supported nPlayer versions: {', '.join(sorted(supported)) or 'none'}\n"
+        "  (an already-patched IPA and an App Store-encrypted dump both fail this check)"
     )
