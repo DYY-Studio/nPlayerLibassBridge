@@ -22,6 +22,15 @@ DEFAULT_MAIN = ROOT / "build" / "macho" / "main-phase-b"
 DEFAULT_BRIDGE = ROOT / "build" / "LibASSBridge.dylib"
 DEFAULT_REPORT = ROOT / "dist" / "verification.json"
 EXTRACT_ROOT = ROOT / "build" / "verify"
+ACCEPTANCE = ROOT / "acceptance.json"
+
+
+def load_acceptance() -> dict | None:
+    """Return the recorded device acceptance, when one exists."""
+
+    if not ACCEPTANCE.is_file():
+        return None
+    return json.loads(ACCEPTANCE.read_text(encoding="utf-8"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,15 +46,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bridge", type=Path, default=DEFAULT_BRIDGE)
     parser.add_argument("--mode", choices=MODES, default=None)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--device-model", default="")
-    parser.add_argument("--device-os", default="")
-    parser.add_argument("--device-install", default="")
-    parser.add_argument(
-        "--note",
-        action="append",
-        default=[],
-        help="device acceptance observation, repeatable",
-    )
     arguments = parser.parse_args(argv)
     try:
         manifest = load_manifest(ROOT / "manifests" / "nplayer-3.13.0.json")
@@ -83,14 +83,9 @@ def main(argv: list[str] | None = None) -> int:
                 as_dict["artifact"] = str(ipa)
                 reports.append(as_dict)
             document: dict[str, object] = {"artifacts": reports}
-            device = {
-                "model": arguments.device_model,
-                "os": arguments.device_os,
-                "install": arguments.device_install,
-                "notes": arguments.note,
-            }
-            if any(device.values()):
-                document["device"] = device
+            acceptance = load_acceptance()
+            if acceptance is not None:
+                document["acceptance"] = acceptance
             arguments.report.parent.mkdir(parents=True, exist_ok=True)
             arguments.report.write_text(
                 json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -99,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     {
                         "artifacts": [item["mode"] for item in reports],
-                        "device": device if any(device.values()) else None,
+                        "acceptance": acceptance is not None,
                     }
                 )
             )

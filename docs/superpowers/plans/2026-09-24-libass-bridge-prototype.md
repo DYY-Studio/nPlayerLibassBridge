@@ -1169,12 +1169,10 @@ Install `dist/smoke.ipa` and read the on-screen log. Expected: every line `PASS`
 
 - [ ] **Step 6: Publish the verification report**
 
-`dist/verification.json` records the artifact hashes and checks; the device facts travel as options so the report stays reproducible:
+`dist/verification.json` records the artifact hashes and checks. The device acceptance is recorded once in the committed `acceptance.json` and merged into the report by `tools/verify.py --all`, so regenerating the report never drops it:
 
 ```bash
-uv run python tools/verify.py --all --report dist/verification.json \
-  --device-model "<model>" --device-os "<ios>" --device-install "<sideload|LiveContainer>" \
-  --note "<variant>: <observation>"   # repeatable
+uv run python tools/verify.py --all --report dist/verification.json
 ```
 
 - [ ] **Step 7: Commit checkpoint if authorized**

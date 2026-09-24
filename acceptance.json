@@ -1,0 +1,45 @@
+{
+  "device": {
+    "model": "iPhone SE (3rd Gen)",
+    "os": "iOS 17.7.2",
+    "install": "LiveContainer 3.7.2 Stable"
+  },
+  "results": [
+    {
+      "variant": "baseline",
+      "result": "not device-tested",
+      "notes": [
+        "clean IPA plus the two NOP guards; the behaviour the user already runs today"
+      ]
+    },
+    {
+      "variant": "weak-load-only",
+      "result": "pass",
+      "notes": [
+        "starts and behaves like the baseline with zero redirected calls"
+      ]
+    },
+    {
+      "variant": "fallback",
+      "result": "pass",
+      "notes": [
+        "OLD path, no regression; both NOP behaviours intact"
+      ]
+    },
+    {
+      "variant": "bridge",
+      "result": "pass",
+      "notes": [
+        "state NEW; SRT, embedded ASS, Matroska embedded fonts and font cache all normal",
+        "continuous playback normal, including the subtitle track update path"
+      ]
+    },
+    {
+      "variant": "smoke",
+      "result": "pass",
+      "notes": [
+        "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown"
+      ]
+    }
+  ]
+}
