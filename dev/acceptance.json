@@ -47,34 +47,34 @@
     },
     {
       "variant": "libass-multiunit",
-      "result": "pending device re-run",
+      "result": "pass",
       "notes": [
         "clean IPA re-patched after the multi-dylib refactor with `npa-patch --dylib libass`; 21 static checks pass",
         "packaged main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. identical to the accepted `bridge` variant; the payload text region matches byte for byte",
-        "the artifact differs from the accepted one only in the rebuilt LibASSBridge.dylib and its ldid signature",
-        "TODO: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback on the target device"
+        "device: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback all normal, with the rebuilt LibASSBridge.dylib"
       ]
     },
     {
       "variant": "ffmpeg-multiunit",
-      "result": "pending device re-run",
+      "result": "pass",
       "notes": [
         "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
         "packaged main sha256 53748f92f83077f105d719a68ad027bc96786693182422716081055e24656754",
         "the changed-instruction check is exact: only the 19 ffmpeg call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
+        "device: snapshot/thumbnail images render, playback scaling is correct, playback speed change works, audio is correct by ear (pitch and duration), no crash across start/stop and speed changes",
+        "this run is the first device exercise of the swr_free entry point, so the audio teardown and reconfigure paths are covered by real playback",
         "the two audio teardown/reconfigure sites (0x100ABFA38, 0x100ABFB34) call FFmpeg 4.4 swr_free (they pass the address of the context field), so the bridge entry point is npa_swr_free(struct SwrContext **); an earlier mapping to swr_close would have written through the context pointer and corrupted the resampler object. Re-verified against nPlayer.i64 by re-decompiling 0x10112DBE0 (frees *arg via av_freep) versus the real swr_close thunk at 0x10112DC24 (branch to clear_context, called only from the Opus path)",
         "npa_swr_alloc_set_opts keeps 4.4's soft failure: a zero channel-layout mask leaves the layout unset so the error surfaces at swr_init as EINVAL, instead of returning NULL to a caller that does not check it",
-        "TODO: screenshot/thumbnail, playback scaling (decode frame to CVPixelBuffer) and audio playback (resample to AudioUnit) on the target device",
-        "TODO: unit isolation. If the dylib cannot be made to fail on device, the static substitute is: every unit owns its own state word and slot table (states all 0 in the patched main), each unit's machine code only accepts its own basename, and each unit publishes independently, so a failed unit lands on OLD while the others stay NEW"
+        "unit isolation is not separately measured on device; the static substitutes are: every unit owns its own state word and slot table (states all 0 in the patched main), each unit's machine code only accepts its own basename, and each unit publishes independently, so a failed unit lands on OLD while the others stay NEW"
       ]
     },
     {
       "variant": "multiunit-both",
-      "result": "pending device re-run",
+      "result": "pass",
       "notes": [
         "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
         "packaged main sha256 d3793f82ec079723a3b3d057057b4bc9ef1597ab7f9340260e786d9f5ac9fe64; both dylibs are present exactly once",
-        "TODO: quick regression of subtitles, screenshot and audio in one session"
+        "device: subtitles, snapshot and audio all normal in one session, with both dylibs loaded"
       ]
     }
   ]
