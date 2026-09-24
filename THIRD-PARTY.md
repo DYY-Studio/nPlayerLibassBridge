@@ -1,12 +1,15 @@
 # Third-party notices
 
-`LibASSBridge.dylib` (published as a release asset) statically links the
-libraries below. Each one is built from the pinned source recorded in
-`deps/sources.lock.json`; `dev/README.md` documents how to rebuild the same
-closure from those sources, which is what satisfies the source-availability
-requirement of the LGPL component.
+Each bridge dylib published as a release asset statically links the libraries
+listed for it below. Every one is built from pinned sources recorded in
+`deps/sources.lock.json` (libass closure) or `deps/ffmpeg.lock.json` (FFmpeg
+closure); `dev/README.md` documents how to rebuild the same closures from
+those sources, which is what satisfies the source-availability requirement of
+the LGPL components.
 
 No nPlayer code is included or redistributed by this project.
+
+## `LibASSBridge.dylib`
 
 | Library | License | Version | Source |
 | --- | --- | --- | --- |
@@ -17,7 +20,18 @@ No nPlayer code is included or redistributed by this project.
 | fontconfig | MIT-style (Keith Packard) | 2.17.1 | https://gitlab.freedesktop.org/fontconfig/fontconfig |
 | expat | MIT | 2.8.5 | https://github.com/libexpat/libexpat |
 
+## `LibFFmpegBridge.dylib`
+
+| Library | License | Version | Source |
+| --- | --- | --- | --- |
+| FFmpeg (libavutil, libswscale, libswresample) | LGPL-2.1-or-later | 9.0.2 | https://ffmpeg.org/releases/ |
+
+The FFmpeg closure is configured with `--disable-everything` plus
+`--enable-swscale --enable-swresample`, and builds no decoder, demuxer, muxer,
+filter, device or program. No GPL component is enabled, so the LGPL-2.1-or-later
+license above is the one that applies.
+
 The authoritative license texts are the `COPYING`/`LICENSE` files inside each
-upstream source tree. The versions above are the ones pinned by
-`deps/sources.lock.json`; when a pin changes, this table and the manifest's
-`libass_version` change in the same commit.
+upstream source tree. The versions above are the ones pinned by the dependency
+locks; when a pin changes, this table and the matching `dylibs[].library_version`
+in `manifests/nplayer-3.13.0.json` change in the same commit.

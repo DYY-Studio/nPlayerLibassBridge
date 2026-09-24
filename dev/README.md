@@ -52,6 +52,6 @@ The expected packaged main hash is
    together with their SHA-256, plus `LICENSE` and `THIRD-PARTY.md`. The two
    binaries are host-side products; `make bootstrap` reproduces the assembler.
 3. When any pinned dependency version changes, update `THIRD-PARTY.md` and the
-   manifest's `libass_version` in the same commit.
+   matching `dylibs[].library_version` in the manifest in the same commit.
 4. Run `uv run python dev/abi_probe.py` after an iOS SDK change and re-check
    the manifest's `target_abi` block.
