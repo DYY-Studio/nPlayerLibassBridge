@@ -96,9 +96,10 @@ NPA_EXPORT int npa_swr_init(struct SwrContext *context)
     return swr_init(context);
 }
 
-NPA_EXPORT void npa_swr_close(struct SwrContext *context)
+NPA_EXPORT void npa_swr_free(struct SwrContext **context)
 {
-    swr_close(context);
+    /* FFmpeg 4.4 swr_free(): both redirected sites pass &ctx, not ctx. */
+    swr_free(context);
 }
 
 NPA_EXPORT int npa_swr_convert(
@@ -121,6 +122,20 @@ NPA_EXPORT int npa_swr_set_matrix(
     return swr_set_matrix(context, matrix, stride);
 }
 
+/*
+ * Rebuild one channel layout from a legacy int64 mask. FFmpeg 4.4 accepted any
+ * mask here and only failed later, inside swr_init(); the modern helper rejects
+ * a zero mask outright, so a zero mask must leave the layout unset and let
+ * swr_init() return EINVAL exactly as it used to.
+ */
+static void npa_layout_from_legacy_mask(AVChannelLayout *layout, int64_t mask)
+{
+    *layout = (AVChannelLayout){0};
+    if (mask != 0 && av_channel_layout_from_mask(layout, (uint64_t)mask) < 0) {
+        *layout = (AVChannelLayout){0};
+    }
+}
+
 NPA_EXPORT struct SwrContext *npa_swr_alloc_set_opts(
     struct SwrContext *context,
     int64_t outChannelLayout,
@@ -136,13 +151,8 @@ NPA_EXPORT struct SwrContext *npa_swr_alloc_set_opts(
     AVChannelLayout out = {0};
     AVChannelLayout in = {0};
 
-    if (av_channel_layout_from_mask(&out, (uint64_t)outChannelLayout) < 0) {
-        return NULL;
-    }
-    if (av_channel_layout_from_mask(&in, (uint64_t)inChannelLayout) < 0) {
-        av_channel_layout_uninit(&out);
-        return NULL;
-    }
+    npa_layout_from_legacy_mask(&out, outChannelLayout);
+    npa_layout_from_legacy_mask(&in, inChannelLayout);
     if (swr_alloc_set_opts2(
             &context,
             &out,

@@ -113,7 +113,7 @@ class ManifestTests(unittest.TestCase):
                 "npa_swr_set_matrix",
                 "npa_swr_init",
                 "npa_swr_convert",
-                "npa_swr_close",
+                "npa_swr_free",
             },
         )
 

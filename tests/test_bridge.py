@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +11,22 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
 LIBASS = ROOT / "build" / "LibASSBridge.dylib"
 FFMPEG = ROOT / "build" / "LibFFmpegBridge.dylib"
+FFMPEG_INCLUDE = ROOT / "build" / "deps" / "ffmpeg" / "include"
+FFMPEG_SOURCE = ROOT / "bridge" / "npa_ffmpeg_util_bridge.c"
+ABI_PROBE = """\
+#include <stdint.h>
+#include "npa_ffmpeg_util_bridge.c"
+
+/* The app's two swresample free sites pass the address of its context field
+ * (FFmpeg 4.4 swr_free), and its setup site passes NULL plus the legacy int64
+ * channel-layout masks. Both entry points must keep those exact prototypes. */
+static void (*const probe_free)(struct SwrContext **) = npa_swr_free;
+static struct SwrContext *(*const probe_opts)(
+    struct SwrContext *, int64_t, int, int, int64_t, int, int, int, void *
+) = npa_swr_alloc_set_opts;
+
+int npa_abi_probe(void) { return probe_free != 0 && probe_opts != 0; }
+"""
 EXPECTED_LIBASS_SYMBOLS = tuple(
     api.symbol
     for domain in MANIFEST.dylib("libass").domains
@@ -22,7 +39,7 @@ EXPECTED_FFMPEG_SYMBOLS = (
     "npa_sws_freeContext",
     "npa_swr_alloc",
     "npa_swr_init",
-    "npa_swr_close",
+    "npa_swr_free",
     "npa_swr_convert",
     "npa_swr_set_matrix",
     "npa_swr_alloc_set_opts",
@@ -109,6 +126,40 @@ class BridgeTests(unittest.TestCase):
                     "/usr/lib/libSystem.B.dylib",
                 ],
             )
+
+    def test_ffmpeg_shim_keeps_the_legacy_swresample_abi(self):
+        if not FFMPEG_SOURCE.is_file() or not FFMPEG_INCLUDE.is_dir():
+            self.skipTest("the FFmpeg closure is not built")
+        try:
+            macho.sdk_path()
+        except Exception as error:  # noqa: BLE001
+            self.skipTest(f"iOS SDK is not available: {error}")
+        probe = Path(__file__).resolve().parents[1] / "build" / "abi-probe.c"
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        probe.write_text(ABI_PROBE, encoding="utf-8")
+        result = subprocess.run(
+            [
+                macho.xcrun_find("clang"),
+                "-fsyntax-only",
+                "-target",
+                "arm64-apple-ios13.0",
+                "-isysroot",
+                str(macho.sdk_path()),
+                "-I",
+                str(FFMPEG_INCLUDE),
+                "-I",
+                str(FFMPEG_SOURCE.parent),
+                "-Wall",
+                "-Werror=incompatible-pointer-types",
+                "-Werror=implicit-function-declaration",
+                str(probe),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_every_dylib_passes_its_artifact_checks(self):
         for dylib in MANIFEST.dylibs:

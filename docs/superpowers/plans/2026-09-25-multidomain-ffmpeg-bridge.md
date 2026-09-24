@@ -39,13 +39,18 @@ FFmpeg 单元 10 API / 19 调用点：
 | swscale | `npa_sws_scale` | `0x100A234AC`, `0x100A46AB8`, `0x100A8A470`, `0x100A8A4C4` | `0x1008C6540` |
 | swscale | `npa_sws_freeContext` | `0x100A2354C`, `0x100A31DF4`, `0x100A46B78`, `0x100A8A4D0` | `0x1008DE0CC` |
 | swresample | `npa_swr_alloc` | `0x100ABF9DC` | `0x10112C980` |
-| swresample | `npa_swr_close` | `0x100ABFA38`, `0x100ABFB34` | `0x10112DBE0` |
+| swresample | `npa_swr_free` | `0x100ABFA38`, `0x100ABFB34` | `0x10112DBE0` |
 | swresample | `npa_swr_alloc_set_opts` | `0x100ABFB58` | `0x1008744BC` |
 | swresample | `npa_swr_set_matrix` | `0x100ABFC34` | `0x10086E348` |
 | swresample | `npa_swr_init` | `0x100ABFC48` | `0x10112DC28` |
 | swresample | `npa_swr_convert` | `0x100ABFC78` | `0x100874AA4` |
 
 （旧目标地址由 notes 记录；实施前用 `preflight` 的 BL 断言逐条复核，不靠记忆。）
+
+**冻结表勘误（2026-09-25）**：`0x10112DBE0` 是 FFmpeg 4.4 的 `swr_free`，不是 `swr_close`——两个调用点传的是
+上下文字段地址（`SwrContext**`），函数体以 `av_freep` 释放该指针。表中该行已改为 `npa_swr_free`；真正的
+`swr_close` 是 `0x10112DC24`（仅 Opus 路径调用，不在本表内）。其余九行经逐行反编译复核无误。
+证据与判定表见 `notes/ida-investigation.md`。
 
 FFmpeg 源：`https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz`，`archive_sha256 = 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`（本地下载实测得到，非引用）。
 

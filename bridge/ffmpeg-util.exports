@@ -4,7 +4,7 @@ _npa_sws_scale
 _npa_sws_freeContext
 _npa_swr_alloc
 _npa_swr_init
-_npa_swr_close
+_npa_swr_free
 _npa_swr_convert
 _npa_swr_set_matrix
 _npa_swr_alloc_set_opts

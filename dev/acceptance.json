@@ -60,8 +60,10 @@
       "result": "pending device re-run",
       "notes": [
         "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
-        "packaged main sha256 697a89579211a2817f09177d6c5f54963854a1bfa031aec0b21cce567f459e8a",
+        "packaged main sha256 53748f92f83077f105d719a68ad027bc96786693182422716081055e24656754",
         "the changed-instruction check is exact: only the 19 ffmpeg call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
+        "the two audio teardown/reconfigure sites (0x100ABFA38, 0x100ABFB34) call FFmpeg 4.4 swr_free (they pass the address of the context field), so the bridge entry point is npa_swr_free(struct SwrContext **); an earlier mapping to swr_close would have written through the context pointer and corrupted the resampler object. Re-verified against nPlayer.i64 by re-decompiling 0x10112DBE0 (frees *arg via av_freep) versus the real swr_close thunk at 0x10112DC24 (branch to clear_context, called only from the Opus path)",
+        "npa_swr_alloc_set_opts keeps 4.4's soft failure: a zero channel-layout mask leaves the layout unset so the error surfaces at swr_init as EINVAL, instead of returning NULL to a caller that does not check it",
         "TODO: screenshot/thumbnail, playback scaling (decode frame to CVPixelBuffer) and audio playback (resample to AudioUnit) on the target device",
         "TODO: unit isolation. If the dylib cannot be made to fail on device, the static substitute is: every unit owns its own state word and slot table (states all 0 in the patched main), each unit's machine code only accepts its own basename, and each unit publishes independently, so a failed unit lands on OLD while the others stay NEW"
       ]
@@ -71,7 +73,7 @@
       "result": "pending device re-run",
       "notes": [
         "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
-        "packaged main sha256 3481aea90e4fca145bf4930b4178e8283bf0bd7e188528ce9c17e27ed41684bc; both dylibs are present exactly once",
+        "packaged main sha256 d3793f82ec079723a3b3d057057b4bc9ef1597ab7f9340260e786d9f5ac9fe64; both dylibs are present exactly once",
         "TODO: quick regression of subtitles, screenshot and audio in one session"
       ]
     }

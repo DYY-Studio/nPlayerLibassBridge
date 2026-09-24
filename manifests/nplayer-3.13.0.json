@@ -194,7 +194,7 @@
               "old_target": "0x100874AA4"
             },
             {
-              "symbol": "npa_swr_close",
+              "symbol": "npa_swr_free",
               "call_sites": ["0x100ABFA38", "0x100ABFB34"],
               "old_target": "0x10112DBE0"
             }
