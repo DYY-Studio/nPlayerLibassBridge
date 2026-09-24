@@ -1,0 +1,15 @@
+_npa_ass_library_init
+_npa_ass_library_done
+_npa_ass_set_fonts_dir
+_npa_ass_set_extract_fonts
+_npa_ass_set_message_cb
+_npa_ass_renderer_init
+_npa_ass_renderer_done
+_npa_ass_set_frame_size
+_npa_ass_set_fonts
+_npa_ass_render_frame
+_npa_ass_new_track
+_npa_ass_process_codec_private
+_npa_ass_process_data
+_npa_ass_free_track
+_npa_ass_flush_events
