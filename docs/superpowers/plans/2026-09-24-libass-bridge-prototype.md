@@ -1059,6 +1059,12 @@ feat: package reproducible libass bridge IPAs
 
 **Files:**
 - Create: `nPlayerLibassBridge/smoke/BridgeSmoke/BridgeSmokeApp.m`
+- Create: `nPlayerLibassBridge/smoke/BridgeSmoke/Info.plist`
+- Create: `nPlayerLibassBridge/tools/smoke.py`
+
+目标设备是非越狱机（侧载或 LiveContainer），因此 smoke 应用以**手写 app bundle → `dist/smoke.ipa`** 的形式产出，与四个生产变体走同一条安装路径；不使用 Theos（.deb 只能在越狱设备上跑，且无法验证 `/Applications` 之外的加载路径）。
+
+bundle 布局与生产一致：`Payload/BridgeSmoke.app/BridgeSmoke` + `Payload/BridgeSmoke.app/Frameworks/LibASSBridge.dylib`，应用用 `dlopen("@executable_path/Frameworks/LibASSBridge.dylib")` 加载，从而连加载路径一并验证。
 
 - [ ] **Step 1: Build the standalone iOS smoke app**
 
@@ -1078,11 +1084,11 @@ verify public image fields
 exercise app-compatible teardown ordering, including renderer/library release before npa_ass_free_track
 ```
 
-Only the app-compatible teardown order is exercised. The smoke app contains no production bridge behavior.
+Only the app-compatible teardown order is exercised. The smoke app contains no production bridge behavior. Every step is reported on screen as `PASS`/`FAIL` plus a final `SMOKE: PASS|FAIL`, and mirrored to `NSLog`.
 
 - [ ] **Step 2: Build and check the target**
 
-Expected: builds arm64 / iOS 13; `otool -l` shows the expected platform and minos.
+`make smoke` compiles, signs and packages the app; `publish_app_bundle` rejects the artifact unless the binary is arm64 with minos 13.0 and the IPA carries exactly one app binary and one embedded bridge dylib.
 
 - [ ] **Step 3: Commit checkpoint if authorized**
 
@@ -1107,21 +1113,31 @@ make clean
 make bootstrap
 make deps
 make bridge
-make verify
+make phase-a
+make phase-b
+make baseline
+make weak-load-only
+make fallback
+make bridge-ipa
+make smoke
+uv run python tools/verify.py --all --report dist/verification.json
 uv run pytest
 ```
 
-Expected: zero failures.
+Expected: zero failures. `tools/verify.py --all` verifies the *shipped* bytes of every variant with the contract of its mode:
 
-- [ ] **Step 2: Build all artifacts from the clean IPA**
+```text
+baseline        only the two NOP guards changed
+weak-load-only  frozen layout, payload still placeholders, no redirects
+fallback        16 redirects, payload installed, no bridge
+bridge          fallback plus the 15-export dylib
+```
 
-Reject use of `nPlayer`, `nPlayer.bak` or the already-patched `Payload/nPlayer.app` as patch input. Build `baseline`, `weak-load-only`, `fallback` and `bridge`.
-
-- [ ] **Step 3: Test weak load**
+- [ ] **Step 2: Device acceptance, weak load**
 
 Install `weak-load-only.ipa` without the bridge. Expected: app starts and behaves like the baseline.
 
-- [ ] **Step 4: Test fallback dispatch**
+- [ ] **Step 3: Device acceptance, fallback dispatch**
 
 Install `fallback.ipa`. Expected:
 
@@ -1132,7 +1148,7 @@ both existing NOP behaviors remain
 normal teardown
 ```
 
-- [ ] **Step 5: Test bridge dispatch and subtitle matrix**
+- [ ] **Step 4: Device acceptance, bridge dispatch and subtitle matrix**
 
 Install `bridge.ipa`. Expected:
 
@@ -1154,9 +1170,13 @@ seek and flush
 repeated open/close cycles
 ```
 
+- [ ] **Step 5: Device acceptance, standalone smoke app**
+
+Install `dist/smoke.ipa` and read the on-screen log. Expected: every line `PASS` and a final `SMOKE: PASS`; in particular a non-empty `ASS_Image` list and a clean app-compatible teardown.
+
 - [ ] **Step 6: Publish the verification report**
 
-Record artifact hashes, checks, device model/iOS, state result, callback result, font cases and teardown result in `dist/verification.json`.
+`dist/verification.json` already records the artifact hashes and checks. Append the device facts — device model/iOS, install path (sideload or LiveContainer), state result, callback result, font cases, smoke result and teardown result.
 
 - [ ] **Step 7: Commit checkpoint if authorized**
 
@@ -1168,10 +1188,11 @@ test: complete libass bridge prototype verification
 
 ---
 
-## 执行记录（Task 1–7 已落地）
+## 执行记录（Task 1–11 已落地）
 
 执行过程中确认的偏差，后续任务以此为准：
 
+- 目标设备：**非越狱机**，通过侧载或 LiveContainer 安装无壳 IPA；采用磁盘 Patch，不需要内存写权限，因此没有 Inline Hook 方案。所有变体都是 IPA，`smoke.ipa` 也一样。
 - Task 1 Step 2（修正报告）在上一轮已完成，`notes/ida-investigation-2.md` 无需改动。
 - 环境：`pyproject.toml` + `uv.lock` 已经建立，由 Task 1 Step 1 落地；`requires-python = ">=3.11,<3.15"`，uv 选了 3.12。
 - 依赖：全部改用官方 release tarball；gperf 已删除（FriBidi release 自带生成源，Fontconfig 使用系统 `/usr/bin/gperf`）。FriBidi 的 `gen.tab/meson.build` 需要 build-machine 编译器，因此新增 `deps/macos-arm64.native`，并把 host 编译参数移进 `deps/ios-arm64.cross` 的 `[built-in options]`，避免 `SDKROOT`/`CFLAGS` 污染 native 编译器。
@@ -1181,7 +1202,12 @@ test: complete libass bridge prototype verification
   - 新增 segment 的 VA/file offset 由 LIEF 决定（紧接 `__DATA` 之后），`__LINKEDIT` 被移到新 segment 之后。其余 segment 与全部 section 的 VA 不变；dylib 序号、bind/lazy、export trie、symtab、function starts 与既有 section 内容逐项相同。验证器因此把「只有 `__LINKEDIT` 可以移动」作为唯一例外。
   - LIEF 会把 segment 的 `file_size` 向上取整到 16 KiB。reservation 仍是 payload 的精确大小；Phase A 证明大小与 VA 无关，Phase B 只要求 payload 不越界且不溢出到 data segment。
   - `phase_a` 返回 Phase A 报告，并在省略 `reserved_text` 时自行测量。
-- 产物布局：`build/input/nPlayer`（clean main）、`build/macho/main-phase-a|b`、`build/LibASSBridge.dylib`、`build/deps/*`。
+- 验证器：`npabridge/verify.py` 为每条性质给出一个具名 check 与错误码，`build_bridge.verify_bridge` 复用它；按 mode 区分契约（baseline / weak-load-only / fallback / bridge）。`main.host_paths` 被删除——原始二进制本身带有上游构建路径，而 bridge 与依赖产物仍然扫描 host 路径。
+- 打包：四个变体走 `npabridge/package.py` + `tools/package.py`，ldid 伪签名后原子发布；`dist/smoke.ipa` 走 `publish_app_bundle`。非越狱侧载/LiveContainer 会由侧载工具重新签名整个 bundle，我们的 `ldid -S` 只保证自签名可加载。
+- 产物布局：`build/input/nPlayer`（clean main）、`build/macho/main-baseline|phase-a|phase-b`、`build/LibASSBridge.dylib`、`build/deps/*`、`dist/*.ipa`、`dist/verification.json`。
+
+**尚未执行**：Task 11 的 Step 2–6 是设备验收，需要在真机上安装 `dist/*.ipa` 并记录结果；`dist/verification.json` 目前只包含构建期检查与产物哈希。
+
 
 ---
 

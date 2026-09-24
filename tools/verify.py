@@ -14,7 +14,7 @@ if __package__ in (None, ""):
 
 from npabridge import package  # noqa: E402
 from npabridge.manifest import load_manifest  # noqa: E402
-from npabridge.verify import MODES, verify_artifact  # noqa: E402
+from npabridge.verify import MODES, VerificationError, verify_artifact  # noqa: E402
 
 
 IPA = ROOT.parent / "nPlayer_3.13.0.ipa"
@@ -27,6 +27,11 @@ EXTRACT_ROOT = ROOT / "build" / "verify"
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ipa", type=Path, default=None, help="verify a packaged IPA")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="verify every packaged variant in dist/ and write one report",
+    )
     parser.add_argument("--baseline", type=Path, default=None)
     parser.add_argument("--main", type=Path, default=DEFAULT_MAIN)
     parser.add_argument("--bridge", type=Path, default=DEFAULT_BRIDGE)
@@ -51,6 +56,34 @@ def main(argv: list[str] | None = None) -> int:
         else:
             main = arguments.main
             bridge = arguments.bridge if arguments.bridge.is_file() else None
+        if arguments.all:
+            reports = []
+            for variant in MODES:
+                ipa = arguments.report.parent / f"{variant}.ipa"
+                extracted = package.extract_for_verification(
+                    ipa, EXTRACT_ROOT / variant
+                )
+                report = verify_artifact(
+                    baseline,
+                    extracted["main"],
+                    manifest,
+                    extracted.get("bridge"),
+                    variant,
+                )
+                as_dict = report.as_dict()
+                as_dict["artifact"] = str(ipa)
+                reports.append(as_dict)
+            arguments.report.parent.mkdir(parents=True, exist_ok=True)
+            arguments.report.write_text(
+                json.dumps({"artifacts": reports}, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(json.dumps({"artifacts": [item["mode"] for item in reports]}))
+            for item in reports:
+                failed = [check["code"] for check in item["checks"] if not check["ok"]]
+                if failed:
+                    raise VerificationError(tuple(failed))
+            return 0
         mode = arguments.mode or (arguments.ipa.stem if arguments.ipa else None)
         if mode not in MODES:
             raise ValueError(f"cannot infer a verification mode for {mode}")

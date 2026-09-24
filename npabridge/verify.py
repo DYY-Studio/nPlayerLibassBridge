@@ -347,7 +347,7 @@ def verify_main(
         str(patched),
         mode,
         tuple(checks.checks),
-        main_sha256=hashlib.sha256(baseline.read_bytes()).hexdigest(),
+        main_sha256=_sha256(patched),
         state_initial=state,
     )
 
