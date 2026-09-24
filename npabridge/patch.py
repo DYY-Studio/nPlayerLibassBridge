@@ -130,6 +130,8 @@ def patch_ipa(
                 source_main, extracted["main"], manifest, extracted["bridge"]
             )
             report.require()
+            packaged_main_sha256 = _sha256(extracted["main"])
+            bridge_sha256 = _sha256(extracted["bridge"])
             output_path.parent.mkdir(parents=True, exist_ok=True)
             temporary.replace(output_path)
         except Exception:
@@ -145,8 +147,8 @@ def patch_ipa(
         app_version=manifest.app_version,
         libass_version=manifest.libass_version,
         source_main_sha256=source_digest,
-        packaged_main_sha256=_sha256(extracted["main"]),
-        bridge_sha256=_sha256(extracted["bridge"]),
+        packaged_main_sha256=packaged_main_sha256,
+        bridge_sha256=bridge_sha256,
         state_initial=report.state_initial,
         checks_passed=len(report.checks),
     )

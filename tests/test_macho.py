@@ -17,8 +17,9 @@ from npabridge.manifest import load_manifest
 from npabridge.payload import PayloadLayout, assemble_payload
 
 
+from support import SOURCE_IPA
+
 ROOT = Path(__file__).resolve().parents[1]
-IPA = ROOT.parent / "nPlayer_3.13.0.ipa"
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
 BUILD = ROOT / "build" / "macho"
 
@@ -26,9 +27,11 @@ BUILD = ROOT / "build" / "macho"
 class MachOTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not SOURCE_IPA.is_file():
+            raise unittest.SkipTest("source IPA is not present")
         BUILD.mkdir(parents=True, exist_ok=True)
         cls.baseline = BUILD / "test-clean-main"
-        with ZipFile(IPA) as archive:
+        with ZipFile(SOURCE_IPA) as archive:
             cls.baseline.write_bytes(archive.read(IPA_MEMBER))
         cls.layout = BUILD / "test-phase-a"
         cls.patched = BUILD / "test-phase-b"

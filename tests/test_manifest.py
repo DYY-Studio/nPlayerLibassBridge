@@ -5,10 +5,11 @@ from zipfile import ZipFile
 
 from npabridge.manifest import encode_bl, load_manifest
 
+from support import SOURCE_IPA
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = REPOSITORY_ROOT / "manifests" / "nplayer-3.13.0.json"
-BASELINE_IPA = REPOSITORY_ROOT.parent / "nPlayer_3.13.0.ipa"
 MAIN_MEMBER = "Payload/nPlayer.app/nPlayer"
 EXPECTED_API_SYMBOLS = frozenset(
     {
@@ -54,8 +55,10 @@ EXPECTED_CALL_SITES = frozenset(
 class ManifestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not SOURCE_IPA.is_file():
+            raise unittest.SkipTest("source IPA is not present")
         cls.manifest = load_manifest(MANIFEST_PATH)
-        with ZipFile(BASELINE_IPA) as archive:
+        with ZipFile(SOURCE_IPA) as archive:
             cls.main_bytes = archive.read(MAIN_MEMBER)
 
     def test_domain_has_fifteen_unique_apis(self):

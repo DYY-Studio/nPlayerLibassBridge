@@ -1133,3 +1133,33 @@ Co-authored-by: Codex <codex@openai.com>"
 
 执行期发现并修正（Task 4）：`phase_b` 自身在改写前校验原字并写入两处 NOP，`nop_only_main` 只服务已删除的 `baseline` 变体 → 删除该函数；patch 流程为 clean main → `phase_a` → `phase_b`（原计划多插了一步 `nop_only_main`，会因 NOP 站点校验失败而中断）。
 
+## 执行记录（Task 1–8 已落地）
+
+按计划逐 Task 实现，每个 Task 一个 Commit（`main` 分支，用户明确同意）。与计划的偏差全部记在 `.superpowers/sdd/2026-09-25-public-patch-toolchain/progress.md` 的 `Ruling:` 行，摘要如下。
+
+**交付物与验收锚点**（都是实际命令的输出，不是推断）：
+
+| 项目 | 值 | 如何得到 |
+| --- | --- | --- |
+| 交付的 main（IPA 成员，ldid 签名后） | `19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` | `uv run npa-patch ../nPlayer_3.13.0.ipa -o build/accept/bridge.ipa --bridge build/LibASSBridge.dylib` 后读取成员 |
+| 中间件 main（未签名） | `4bb9f5670062c2a7eee5797a02ccb066abdc68a3610f5b01037e123e862a79f3` | `shasum -a 256 build/macho/main-phase-b` |
+| 交付的 bridge dylib（签名后） | `c63ee049676b27b566a55560b6fd4bf6d0b9eae31f541cc12ee15ee1366b36de` | 同一命令的 `bridge_sha256`，与上一轮设备验收的产物一致 |
+| 成品具名 check | 21 项全过 | `npa-patch` 的 `checks_passed` |
+| bridge 契约 check | 7 项全过 | `uv run python -m npabridge.build_bridge --verify-only` |
+| 公开测试 | `uv run pytest -q` → 41 passed | 缺输入 IPA 时 24 skipped / 16 passed（`NPA_SOURCE_IPA=/nonexistent` 验证，无静默通过） |
+| dev 测试 | `uv run pytest dev/tests -q` → 7 passed | 需要 Xcode/iOS SDK |
+
+**关键主张的行为级证明**：`env DEVELOPER_DIR=/nonexistent uv run npa-patch ...` 成功产出与正常环境**逐字节相同**的 IPA（main `19d34471…`），证明 patch 阶段不再触碰 Xcode。
+
+**执行期修正**（计划未预料到的）：
+
+1. **Task 4 的流程链错误**：原计划写 clean main → `nop_only_main` → `phase_a` → `phase_b`，但 `phase_b` 自身就在改写前校验 NOP 原字并写入，`nop_only_main` 只服务已删除的 `baseline` 变体。改为 clean main → `phase_a` → `phase_b`，并删除 `nop_only_main`（死代码）。
+2. **`package_ipa` 暂存目录**：改为调用方传入的 `work`（缺省 `tempfile.mkdtemp`），不再把临时文件写回仓库。
+3. **验收抓到的真 bug**：`patch_ipa` 用默认（临时）`work` 时，`finally` 在工作目录删除后才在 `return` 语句里计算两个哈希 → `FileNotFoundError`。T4 的测试始终显式传 `work=`，所以没覆盖到；已改为在 `try` 内取哈希，并补测试 `test_default_work_directory_is_reported_and_cleaned_up`（先验证其在修复前失败、修复后通过）。
+4. **测试输入约定**：`tests/test_manifest.py`、`tests/test_macho.py` 原先硬编码同级 IPA 路径（缺文件会报错而非跳过），已统一改用 `tests/support.py` + `skipTest`。
+5. **`[project.scripts]` 需要项目被安装**：补 `[build-system] hatchling` 与 wheel 包声明，否则 `uv run npa-patch` 不存在（只保留 `tools/patch.py` 与根入口）。
+6. **`dev/tests/test_toolchain.py` 读的是陈旧探针对象**（T2 改名后旧文件仍在 `build/` 里，测试靠旧文件静默通过），改为现场调用 `dev.abi_probe._compile_probe`。
+7. **删减项按确认执行**：`tools/doctor.py`、`tools/verify.py` 与本计划的初稿测试文件已删除；`tests/support.py` 与 `dev/smoke_package.py` 按用户选择保留。
+
+**未改动**：`bridge/`（桥源码与导出表）、`npabridge/payload.py`（载荷生成与四态状态机）、`npabridge/verify.py` 的检查项本身、`deps/`（pin 与交叉编译）。`dist/` 里上一轮 4 变体产物与 `smoke.ipa` 保留未清理（设备验收证据）。
+

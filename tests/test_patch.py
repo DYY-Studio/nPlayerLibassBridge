@@ -1,6 +1,7 @@
 import hashlib
 import shutil
 import struct
+import tempfile
 import unittest
 import warnings
 from pathlib import Path
@@ -46,6 +47,16 @@ class PatchFlowTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(main).hexdigest(), PACKAGED_MAIN_SHA256)
         finally:
             expected.unlink(missing_ok=True)
+
+    def test_default_work_directory_is_reported_and_cleaned_up(self):
+        output = self.work / "temp-work.ipa"
+        output.unlink(missing_ok=True)
+        temp_root = Path(tempfile.gettempdir())
+        before = set(temp_root.glob("npa-patch-*"))
+        result = patch.patch_ipa(SOURCE_IPA, output, BRIDGE, MANIFESTS)
+        self.assertEqual(set(temp_root.glob("npa-patch-*")), before)
+        self.assertEqual(result.packaged_main_sha256, PACKAGED_MAIN_SHA256)
+        self.assertTrue(output.is_file())
 
     def test_unsupported_version_lists_the_supported_one(self):
         unknown = self.work / "unknown-main"
