@@ -2,6 +2,7 @@ import hashlib
 import shutil
 import struct
 import unittest
+import warnings
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -98,9 +99,11 @@ class PatchFlowTests(unittest.TestCase):
         main.write_bytes(bytes(raw))
         shutil.copy2(source, output)
         # zipfile.read() resolves the last entry with a given name, so the
-        # appended copy wins
-        with ZipFile(output, "a") as archive:
-            archive.write(main, patch.MAIN_MEMBER)
+        # appended copy wins; the duplicate entry is deliberate
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with ZipFile(output, "a") as archive:
+                archive.write(main, patch.MAIN_MEMBER)
 
 
 if __name__ == "__main__":
