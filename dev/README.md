@@ -48,8 +48,9 @@ The expected packaged main hash is
 ## Release checklist
 
 1. `make bridge` and `make verify`.
-2. Publish `build/LibASSBridge.dylib` as a release asset together with its
-   SHA-256, `LICENSE` and `THIRD-PARTY.md`.
+2. Publish `build/LibASSBridge.dylib` and `libkeystone.dylib` as release assets
+   together with their SHA-256, plus `LICENSE` and `THIRD-PARTY.md`. The two
+   binaries are host-side products; `make bootstrap` reproduces the assembler.
 3. When any pinned dependency version changes, update `THIRD-PARTY.md` and the
    manifest's `libass_version` in the same commit.
 4. Run `uv run python dev/abi_probe.py` after an iOS SDK change and re-check

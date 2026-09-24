@@ -6,9 +6,9 @@ import ctypes
 from pathlib import Path
 
 
-DEFAULT_LIBRARY = (
-    Path(__file__).resolve().parents[1] / "build" / "host" / "libkeystone.dylib"
-)
+# The host assembler is a build product / release asset, not a Python package:
+# `make bootstrap` writes it here, and release users drop the pinned asset here.
+DEFAULT_LIBRARY = Path(__file__).resolve().parents[1] / "libkeystone.dylib"
 ARCH_ARM64 = 2
 MODE_LITTLE_ENDIAN = 0
 SUPPORTED_VERSION = (0, 9)
@@ -18,7 +18,11 @@ class Toolchain:
     def __init__(self, library_path: str | Path | None = None) -> None:
         selected = DEFAULT_LIBRARY if library_path is None else Path(library_path)
         if not selected.is_file():
-            raise FileNotFoundError(selected)
+            raise FileNotFoundError(
+                f"host assembler library is missing: {selected}\n"
+                "  run `make bootstrap`, or copy libkeystone.dylib from the release "
+                "assets next to the package (the patch flow runs from a repository checkout)"
+            )
         self.library_path = selected.resolve()
         self._library = ctypes.CDLL(str(self.library_path))
         self._bind_api()
