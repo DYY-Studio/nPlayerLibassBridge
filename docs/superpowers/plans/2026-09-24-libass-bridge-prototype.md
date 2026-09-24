@@ -1025,7 +1025,7 @@ Run `ldid -S` separately on the main executable and bridge before repacking.
 
 - [ ] **Step 4: Publish atomically**
 
-Write to `dist/.tmp-*`; run the full verifier; rename to final filename only after success. On any failure, remove incomplete output.
+Write to `dist/.tmp-*`, check the member contents, then rename to the final filename; on any failure remove the incomplete output. `make dist` runs the full artifact verifier over all shipped variants once they are built.
 
 - [ ] **Step 5: Add Make targets**
 
@@ -1113,14 +1113,7 @@ make clean
 make bootstrap
 make deps
 make bridge
-make phase-a
-make phase-b
-make baseline
-make weak-load-only
-make fallback
-make bridge-ipa
-make smoke
-uv run python tools/verify.py --all --report dist/verification.json
+make dist          # phase-a/phase-b, the four variants, smoke.ipa, then verify --all
 uv run pytest
 ```
 

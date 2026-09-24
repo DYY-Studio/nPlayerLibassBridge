@@ -68,7 +68,7 @@ class VerifyTests(unittest.TestCase):
         report = verify_artifact(self.baseline, mutated, MANIFEST)
         with self.assertRaises(VerificationError) as caught:
             report.require()
-        self.assertIn("main.instructions", caught.exception.codes)
+        self.assertIn("main.call_sites", caught.exception.codes)
 
     def test_non_zero_state_is_rejected(self):
         mutated = self._mutate(self.patched, "mutated-state")

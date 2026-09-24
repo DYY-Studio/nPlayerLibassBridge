@@ -319,25 +319,34 @@ def verify_main(
     checks.run("main.bindings", lambda: _bindings(before, after))
     if mode == "baseline":
         checks.run("main.segments", lambda: _segments_unchanged(before, after))
-        checks.run("main.sections", lambda: _sections(before, after))
+        checks.run("main.sections", lambda: _sections(before, after, strict_text=False))
         checks.run("main.dylib_ordinals", lambda: _ordinals_unchanged(before, after))
-        checks.run("main.instructions", lambda: _changed_sites(patched, after, macho.NOP_SITES))
+        checks.run("main.instructions", lambda: _changed_sites(before, after, set(macho.NOP_SITES)))
         checks.run("main.nops", lambda: _nops(patched))
         state = 0
     elif mode == "weak-load-only":
         checks.run("main.segments", lambda: _segments(before, after))
         checks.run("main.sections", lambda: _sections(before, after))
         checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
-        checks.run("main.instructions", lambda: _call_sites_original(patched, after, manifest))
+        checks.run("main.instructions", lambda: _changed_sites(before, after, set()))
+        checks.run("main.call_sites", lambda: _call_sites_original(patched, after, manifest))
         checks.run("payload.empty", lambda: _payload_empty(after))
         checks.run("payload.state", lambda: _payload_state(after))
         checks.run("payload.slots", lambda: _payload_slots(after))
         state = 0
     else:
         checks.run("main.segments", lambda: _segments(before, after))
-        checks.run("main.sections", lambda: _sections(before, after))
+        checks.run("main.sections", lambda: _sections(before, after, strict_text=False))
         checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
-        checks.run("main.instructions", lambda: _changed_and_patched(patched, after, manifest, abi))
+        checks.run(
+            "main.instructions",
+            lambda: _changed_sites(
+                before,
+                after,
+                {site for api in manifest.apis for site in api.call_sites} | set(macho.NOP_SITES),
+            ),
+        )
+        checks.run("main.call_sites", lambda: _changed_and_patched(patched, after, manifest, abi))
         checks.run("main.nops", lambda: _nops(patched))
         payload = _payload_checks(checks, after, manifest, abi)
         state = struct.unpack_from(
@@ -381,7 +390,7 @@ def _segments(before: Any, after: Any) -> str:
     return f"payload segments at {text.virtual_address:#x}/{data.virtual_address:#x}"
 
 
-def _sections(before: Any, after: Any) -> str:
+def _sections(before: Any, after: Any, strict_text: bool = True) -> str:
     _require(
         macho.snapshot(before).section_vas == macho.snapshot(after).section_vas,
         "an existing section moved",
@@ -389,10 +398,32 @@ def _sections(before: Any, after: Any) -> str:
     old_bytes = macho.section_bytes(before)
     new_bytes = macho.section_bytes(after)
     for name, content in old_bytes.items():
-        if name == "__TEXT,__text":
+        if name == "__TEXT,__text" and not strict_text:
             continue
         _require(new_bytes.get(name) == content, f"section {name} changed")
     return f"{len(old_bytes)} sections stable"
+
+
+def _changed_words(before: Any, after: Any, section: str) -> set[int]:
+    old = macho.section_bytes(before)[section]
+    new = macho.section_bytes(after)[section]
+    _require(len(old) == len(new), f"{section} changed shape")
+    base = macho.snapshot(before).section_vas[section]
+    return {
+        base + index
+        for index in range(0, len(old) - 3, 4)
+        if old[index : index + 4] != new[index : index + 4]
+    }
+
+
+def _changed_sites(before: Any, after: Any, expected: set[int]) -> str:
+    changed = _changed_words(before, after, "__TEXT,__text")
+    _require(
+        changed == expected,
+        f"instruction changes {[hex(item) for item in sorted(changed)]} "
+        f"differ from the allowed sites",
+    )
+    return f"{len(changed)} instruction sites changed"
 
 
 def _dylib_ordinals(before: Any, after: Any, manifest: Manifest) -> str:
@@ -444,17 +475,6 @@ def _call_sites_original(patched: Path, binary: Any, manifest: Manifest) -> str:
             _require(actual == expected, f"call site {site:#x} was redirected")
             count += 1
     return f"{count} call sites still call the old implementation"
-
-
-def _changed_sites(patched: Path, binary: Any, sites: dict[int, int]) -> str:
-    raw = patched.read_bytes()
-    for site in sites:
-        offset = int(binary.virtual_address_to_offset(site))
-        _require(
-            raw[offset : offset + 4] == struct.pack("<I", macho.NOP_WORD),
-            f"site {site:#x} is not the NOP guard",
-        )
-    return f"{len(sites)} sites patched"
 
 
 def _changed_and_patched(

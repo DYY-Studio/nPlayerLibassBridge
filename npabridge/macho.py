@@ -320,85 +320,31 @@ def phase_a(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     binary.write(str(output_path))
     del binary
-    return verify_phase_a(input_path, output_path, manifest, reserved_text, abi)
-
-
-def verify_phase_a(
-    baseline_path: Path,
-    layout_path: Path,
-    manifest: Manifest,
-    reserved_text: int,
-    target_abi: TargetABI | None = None,
-) -> dict[str, Any]:
-    abi = target_abi or load_target_abi(sdk_path())
-    before = parse(baseline_path)
-    after = parse(layout_path)
-    old, new = snapshot(before), snapshot(after)
-    if before.header.cpu_type != lief.MachO.Header.CPU_TYPE.ARM64:
-        raise ValueError("baseline is not arm64")
-    if old.entrypoint != new.entrypoint:
-        raise ValueError("entrypoint changed")
-    if old.section_vas != new.section_vas:
-        raise ValueError("an existing section moved")
-    moved = [
-        name
-        for name, address in old.segment_vas.items()
-        if new.segment_vas.get(name) != address
-    ]
-    if moved != [LINKEDIT]:
-        raise ValueError(f"unexpected segment address changes: {moved}")
-    if old.dylib_ordinals != new.dylib_ordinals[:-1]:
-        raise ValueError("existing dylib ordinals changed")
-    if new.dylib_ordinals[-1][0] != manifest.bridge_path:
-        raise ValueError("bridge is not the final dylib dependency")
-    for name, expected in (
-        ("bind_targets", old.bind_targets),
-        ("lazy_targets", old.lazy_targets),
-        ("export_symbols", old.export_symbols),
-    ):
-        if getattr(new, name) != expected:
-            raise ValueError(f"{name} changed during the rebuild")
-    if after.segments[-1].name != LINKEDIT:
-        raise ValueError("__LINKEDIT is not the final segment")
-    if section_bytes(before) != section_bytes(after):
-        raise ValueError("existing section content changed during the rebuild")
+    after = parse(output_path)
     text = after.get_segment(SEGMENT_TEXT)
     data = after.get_segment(SEGMENT_DATA)
-    if text is None or data is None:
-        raise ValueError("placeholder segments are missing")
-    if int(text.init_protection) != PROTECTION_RX or int(data.init_protection) != PROTECTION_RW:
-        raise ValueError("placeholder segment protections are wrong")
-    reserved_page = _round_up(reserved_text, PAGE)
-    if int(text.file_size) != reserved_page:
-        raise ValueError(
-            f"text reservation is {int(text.file_size)} instead of {reserved_page}"
-        )
-    if int(data.file_size) != _round_up(DATA_BLOB_SIZE, PAGE):
-        raise ValueError(f"data reservation is {int(data.file_size)}")
-    if bytes(text.content) != b"\x00" * reserved_page:
-        raise ValueError("text reservation is not zero-filled")
-    if bytes(data.content) != b"\x00" * int(data.file_size):
-        raise ValueError("data reservation is not zero-filled")
-    if not int(text.virtual_address) + reserved_text <= int(data.virtual_address):
-        raise ValueError("payload text overlaps the data segment")
+    _require(text is not None and data is not None, "placeholder segments are missing")
     layout = PayloadLayout(
         text_vmaddr=int(text.virtual_address),
         data_vmaddr=int(data.virtual_address),
         state_rva=0,
         slots_rva=8,
     )
-    if measure_payload(layout, manifest, abi) != reserved_text:
-        raise ValueError("payload size depends on the final addresses")
+    _require(
+        measure_payload(layout, manifest, abi) == reserved_text,
+        "payload size depends on the final addresses",
+    )
+    state = snapshot(after)
     return {
-        "baseline": str(baseline_path),
-        "layout": str(layout_path),
+        "baseline": str(input_path),
+        "layout": str(output_path),
         "text_vmaddr": layout.text_vmaddr,
         "data_vmaddr": layout.data_vmaddr,
         "reserved_text": reserved_text,
         "text_file_offset": int(text.file_offset),
         "data_file_offset": int(data.file_offset),
-        "linkedit_vmaddr": new.segment_vas[LINKEDIT],
-        "dylib_ordinals": [list(item) for item in new.dylib_ordinals],
+        "linkedit_vmaddr": state.segment_vas[LINKEDIT],
+        "dylib_ordinals": [list(item) for item in state.dylib_ordinals],
     }
 
 
@@ -466,7 +412,10 @@ def phase_b(
         raise ValueError("assembled data blob does not fit its segment")
 
     buffer = bytearray(layout_path.read_bytes())
-    before = section_bytes(binary)
+    writes: list[tuple[int, int]] = [
+        (int(text.file_offset), len(payload.text)),
+        (int(data.file_offset), len(payload.data)),
+    ]
     write_equal_length(buffer, int(text.file_offset), payload.text)
     write_equal_length(buffer, int(data.file_offset), payload.data)
     for api in manifest.apis:
@@ -478,105 +427,44 @@ def phase_b(
                 raise ValueError(f"call site {site:#x} is no longer the frozen BL")
             target = payload.symbols[f"veneer_{api.symbol}"]
             write_equal_length(buffer, offset, patch_bl(site, target))
+            writes.append((offset, 4))
     for site, expected in NOP_SITES.items():
         offset = int(binary.virtual_address_to_offset(site))
         if struct.unpack_from("<I", buffer, offset)[0] != expected:
             raise ValueError(f"NOP site {site:#x} no longer holds the original guard")
         write_equal_length(buffer, offset, struct.pack("<I", NOP_WORD))
+        writes.append((offset, 4))
 
+    _assert_intended_writes(layout_path.read_bytes(), bytes(buffer), writes)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(bytes(buffer))
     del binary
-    return verify_phase_b(layout_path, output_path, manifest, payload)
-
-
-def verify_phase_b(
-    layout_path: Path,
-    output_path: Path,
-    manifest: Manifest,
-    payload: Any | None = None,
-) -> dict[str, Any]:
-    before = parse(layout_path)
-    after = parse(output_path)
-    old, new = snapshot(before), snapshot(after)
-    for field in ("segment_vas", "section_vas", "entrypoint", "dylib_ordinals"):
-        if getattr(old, field) != getattr(new, field):
-            raise ValueError(f"phase B changed {field}")
-    if old.bind_targets != new.bind_targets or old.lazy_targets != new.lazy_targets:
-        raise ValueError("phase B changed the binding tables")
-    if old.export_symbols != new.export_symbols:
-        raise ValueError("phase B changed the export trie")
-    changes = _changed_words(before, after)
-    allowed = {
-        site for api in manifest.apis for site in api.call_sites
-    } | set(NOP_SITES)
-    unexpected = sorted(changes - allowed)
-    if unexpected:
-        raise ValueError(f"unexpected instruction changes: {[hex(item) for item in unexpected]}")
-    missing = sorted(allowed - changes)
-    if missing:
-        raise ValueError(f"missing patches: {[hex(item) for item in missing]}")
-    if len(changes) != len(allowed):
-        raise ValueError(f"changed {len(changes)} instructions, expected {len(allowed)}")
-    if layout_path.stat().st_size != output_path.stat().st_size:
-        raise ValueError("phase B changed the file size")
-    if payload is not None:
-        text = before.get_segment(SEGMENT_TEXT)
-        data = before.get_segment(SEGMENT_DATA)
-        raw = output_path.read_bytes()
-        written = raw[
-            int(text.file_offset) : int(text.file_offset) + len(payload.text)
-        ]
-        if written != payload.text:
-            raise ValueError("payload text was not written at the reserved offset")
-        blob = raw[int(data.file_offset) : int(data.file_offset) + len(payload.data)]
-        if blob != payload.data:
-            raise ValueError("payload data was not written at the reserved offset")
-        for api in manifest.apis:
-            for site in api.call_sites:
-                offset = int(after.virtual_address_to_offset(site))
-                veneer = payload.symbols[f"veneer_{api.symbol}"]
-                expected = patch_bl(site, veneer)
-                if raw[offset : offset + 4] != expected:
-                    raise ValueError(f"call site {site:#x} was not redirected")
-        for site in NOP_SITES:
-            offset = int(after.virtual_address_to_offset(site))
-            if raw[offset : offset + 4] != struct.pack("<I", NOP_WORD):
-                raise ValueError(f"NOP site {site:#x} was not patched")
-    report: dict[str, Any] = {
+    return {
         "layout": str(layout_path),
         "output": str(output_path),
-        "patched_call_sites": len(allowed) - len(NOP_SITES),
+        "patched_call_sites": sum(len(api.call_sites) for api in manifest.apis),
         "nop_sites": sorted(NOP_SITES),
-        "text_vmaddr": old.segment_vas[SEGMENT_TEXT],
-        "data_vmaddr": old.segment_vas[SEGMENT_DATA],
+        "text_vmaddr": layout.text_vmaddr,
+        "data_vmaddr": layout.data_vmaddr,
+        "payload_text_size": len(payload.text),
+        "payload_symbols": len(payload.symbols),
     }
-    if payload is not None:
-        report["payload_text_size"] = len(payload.text)
-        report["payload_symbols"] = len(payload.symbols)
-    return report
 
 
-def _changed_words(before: Any, after: Any) -> set[int]:
-    """Return the virtual addresses of every changed word outside the payload."""
+def _assert_intended_writes(before: bytes, after: bytes, writes: list[tuple[int, int]]) -> None:
+    """Phase B may only touch the declared ranges."""
 
-    old_sections = section_bytes(before)
-    new_sections = section_bytes(after)
-    changed: set[int] = set()
-    for name, old in old_sections.items():
-        segment_name, _, section_name = name.partition(",")
-        if segment_name in (SEGMENT_TEXT, SEGMENT_DATA):
-            continue
-        new = new_sections.get(name)
-        if new is None or len(new) != len(old):
-            raise ValueError(f"section {name} changed shape")
-        if new == old:
-            continue
-        base = int(before.get_section(section_name).virtual_address)
-        for index in range(0, len(old) - 3, 4):
-            if old[index : index + 4] != new[index : index + 4]:
-                changed.add(base + index)
-    return changed
+    _require(len(before) == len(after), "phase B changed the file size")
+    touched = bytearray(len(before))
+    for offset, size in writes:
+        for index in range(offset, offset + size):
+            touched[index] = 1
+    for index in range(len(before)):
+        if not touched[index]:
+            _require(
+                before[index] == after[index],
+                f"phase B changed byte {index:#x} outside the declared writes",
+            )
 
 
 def sdk_path() -> Path:
