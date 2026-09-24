@@ -1168,6 +1168,23 @@ test: complete libass bridge prototype verification
 
 ---
 
+## 执行记录（Task 1–7 已落地）
+
+执行过程中确认的偏差，后续任务以此为准：
+
+- Task 1 Step 2（修正报告）在上一轮已完成，`notes/ida-investigation-2.md` 无需改动。
+- 环境：`pyproject.toml` + `uv.lock` 已经建立，由 Task 1 Step 1 落地；`requires-python = ">=3.11,<3.15"`，uv 选了 3.12。
+- 依赖：全部改用官方 release tarball；gperf 已删除（FriBidi release 自带生成源，Fontconfig 使用系统 `/usr/bin/gperf`）。FriBidi 的 `gen.tab/meson.build` 需要 build-machine 编译器，因此新增 `deps/macos-arm64.native`，并把 host 编译参数移进 `deps/ios-arm64.cross` 的 `[built-in options]`，避免 `SDKROOT`/`CFLAGS` 污染 native 编译器。
+- Payload：删除对生成文本的匹配，改为字节级断言（无 64 位 MOVZ/MOVK、无 LDR literal、恰好两次 STLR）；移除未使用的 `Payload.source`、`generate_source` 与 stub 别名。
+- LIEF：
+  - 必须持有 parse container，否则访问 header/section 会崩溃；`macho.parse()` 返回的 `ParsedMachO` 封装了这一点。
+  - 新增 segment 的 VA/file offset 由 LIEF 决定（紧接 `__DATA` 之后），`__LINKEDIT` 被移到新 segment 之后。其余 segment 与全部 section 的 VA 不变；dylib 序号、bind/lazy、export trie、symtab、function starts 与既有 section 内容逐项相同。验证器因此把「只有 `__LINKEDIT` 可以移动」作为唯一例外。
+  - LIEF 会把 segment 的 `file_size` 向上取整到 16 KiB。reservation 仍是 payload 的精确大小；Phase A 证明大小与 VA 无关，Phase B 只要求 payload 不越界且不溢出到 data segment。
+  - `phase_a` 返回 Phase A 报告，并在省略 `reserved_text` 时自行测量。
+- 产物布局：`build/input/nPlayer`（clean main）、`build/macho/main-phase-a|b`、`build/LibASSBridge.dylib`、`build/deps/*`。
+
+---
+
 ## Self-Review
 
 - All frozen architecture requirements map to explicit tasks.
