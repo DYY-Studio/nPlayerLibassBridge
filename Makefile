@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: bootstrap deps bridge phase-a phase-b baseline weak-load-only fallback bridge-ipa verify test clean
+.PHONY: bootstrap deps bridge phase-a phase-b baseline weak-load-only fallback bridge-ipa smoke verify test clean
 
 bootstrap:
 	$(UV) sync --frozen --all-groups
@@ -29,6 +29,9 @@ fallback: phase-b
 
 bridge-ipa: phase-b bridge
 	$(UV) run python tools/package.py --variant bridge
+
+smoke: bridge
+	$(UV) run python tools/smoke.py
 
 verify:
 	$(UV) run python tools/verify.py

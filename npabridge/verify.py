@@ -35,6 +35,7 @@ FORBIDDEN_DEPENDENCY_STEMS = (
 FORBIDDEN_CALLBACK_TOKENS = ("va_start", "va_end", "va_copy")
 CALLBACK_ARGS = "void(int, const char *, va_list, void *)"
 CALLBACK_PARAMETER = "(*message_cb)(int, const char *, va_list, void *)"
+MODES = ("baseline", "weak-load-only", "fallback", "bridge")
 
 
 class VerificationError(RuntimeError):
@@ -312,20 +313,36 @@ def verify_main(
     except Exception as error:  # noqa: BLE001
         checks.fail("main.macho", str(error))
         return VerificationReport(str(patched), mode, tuple(checks.checks))
+    _require(mode in MODES, f"unknown verification mode: {mode}")
     checks.run("main.baseline_hash", lambda: _baseline_hash(baseline, manifest))
     checks.run("main.entrypoint", lambda: _same_entrypoint(before, after))
-    checks.run("main.segments", lambda: _segments(before, after))
-    checks.run("main.sections", lambda: _sections(before, after))
-    checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
     checks.run("main.bindings", lambda: _bindings(before, after))
-    checks.run("main.nops", lambda: _nops(patched))
-    payload = _payload_checks(checks, after, manifest, abi)
-    if payload is not None:
-        checks.run(
-            "main.instructions",
-            lambda: _instructions(patched, after, manifest, payload),
-        )
-    state = struct.unpack_from("<I", bytes(after.get_segment(macho.SEGMENT_DATA).content), 0)[0]
+    if mode == "baseline":
+        checks.run("main.segments", lambda: _segments_unchanged(before, after))
+        checks.run("main.sections", lambda: _sections(before, after))
+        checks.run("main.dylib_ordinals", lambda: _ordinals_unchanged(before, after))
+        checks.run("main.instructions", lambda: _changed_sites(patched, after, macho.NOP_SITES))
+        checks.run("main.nops", lambda: _nops(patched))
+        state = 0
+    elif mode == "weak-load-only":
+        checks.run("main.segments", lambda: _segments(before, after))
+        checks.run("main.sections", lambda: _sections(before, after))
+        checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
+        checks.run("main.instructions", lambda: _call_sites_original(patched, after, manifest))
+        checks.run("payload.empty", lambda: _payload_empty(after))
+        checks.run("payload.state", lambda: _payload_state(after))
+        checks.run("payload.slots", lambda: _payload_slots(after))
+        state = 0
+    else:
+        checks.run("main.segments", lambda: _segments(before, after))
+        checks.run("main.sections", lambda: _sections(before, after))
+        checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
+        checks.run("main.instructions", lambda: _changed_and_patched(patched, after, manifest, abi))
+        checks.run("main.nops", lambda: _nops(patched))
+        payload = _payload_checks(checks, after, manifest, abi)
+        state = struct.unpack_from(
+            "<I", bytes(after.get_segment(macho.SEGMENT_DATA).content), 0
+        )[0]
     return VerificationReport(
         str(patched),
         mode,
@@ -395,7 +412,55 @@ def _bindings(before: Any, after: Any) -> str:
     return f"{len(old.bind_targets)} bindings stable"
 
 
-def _instructions(patched: Path, binary: Any, manifest: Manifest, payload: Payload) -> str:
+def _segments_unchanged(before: Any, after: Any) -> str:
+    old = {segment.name: int(segment.virtual_address) for segment in before.segments}
+    new = {segment.name: int(segment.virtual_address) for segment in after.segments}
+    _require(old == new, "segments changed in the baseline variant")
+    return f"{len(old)} segments unchanged"
+
+
+def _ordinals_unchanged(before: Any, after: Any) -> str:
+    old = macho.snapshot(before).dylib_ordinals
+    new = macho.snapshot(after).dylib_ordinals
+    _require(old == new, "dylib ordinals changed in the baseline variant")
+    return f"{len(old)} dylib commands"
+
+
+def _payload_empty(binary: Any) -> str:
+    for name in (macho.SEGMENT_TEXT, macho.SEGMENT_DATA):
+        content = bytes(binary.get_segment(name).content)
+        _require(content == b"\x00" * len(content), f"{name} is not zero-filled")
+    return "payload segments are still placeholders"
+
+
+def _call_sites_original(patched: Path, binary: Any, manifest: Manifest) -> str:
+    raw = patched.read_bytes()
+    count = 0
+    for api in manifest.apis:
+        for site in api.call_sites:
+            offset = int(binary.virtual_address_to_offset(site))
+            expected = struct.pack("<I", encode_bl(site, api.old_target))
+            actual = raw[offset : offset + 4]
+            _require(actual == expected, f"call site {site:#x} was redirected")
+            count += 1
+    return f"{count} call sites still call the old implementation"
+
+
+def _changed_sites(patched: Path, binary: Any, sites: dict[int, int]) -> str:
+    raw = patched.read_bytes()
+    for site in sites:
+        offset = int(binary.virtual_address_to_offset(site))
+        _require(
+            raw[offset : offset + 4] == struct.pack("<I", macho.NOP_WORD),
+            f"site {site:#x} is not the NOP guard",
+        )
+    return f"{len(sites)} sites patched"
+
+
+def _changed_and_patched(
+    patched: Path, binary: Any, manifest: Manifest, abi: TargetABI
+) -> str:
+    payload = assemble_payload(payload_layout(binary), manifest, abi)
     raw = patched.read_bytes()
     count = 0
     for api in manifest.apis:
@@ -403,8 +468,10 @@ def _instructions(patched: Path, binary: Any, manifest: Manifest, payload: Paylo
             offset = int(binary.virtual_address_to_offset(site))
             veneer = payload.symbols[f"veneer_{api.symbol}"]
             expected = struct.pack("<I", encode_bl(site, veneer))
-            actual = raw[offset : offset + 4]
-            _require(actual == expected, f"call site {site:#x} is not redirected")
+            _require(
+                raw[offset : offset + 4] == expected,
+                f"call site {site:#x} is not redirected",
+            )
             count += 1
     return f"{count} redirects"
 
@@ -426,18 +493,20 @@ def verify_artifact(
     patched: Path,
     manifest: Manifest,
     bridge: Path | None = None,
+    mode: str | None = None,
     target_abi: TargetABI | None = None,
 ) -> VerificationReport:
     """Verify one packaged pair and merge the bridge checks when present."""
 
     abi = target_abi or load_target_abi(macho.sdk_path())
-    main = verify_main(baseline, patched, manifest, "bridge" if bridge else "fallback", abi)
+    resolved = mode or ("bridge" if bridge else "fallback")
+    main = verify_main(baseline, patched, manifest, resolved, abi)
     if bridge is None:
         return main
     bridge_report = verify_bridge(bridge, manifest)
     return VerificationReport(
         artifact=main.artifact,
-        mode="bridge",
+        mode=resolved,
         checks=main.checks + bridge_report.checks,
         main_sha256=main.main_sha256,
         bridge_sha256=bridge_report.bridge_sha256,

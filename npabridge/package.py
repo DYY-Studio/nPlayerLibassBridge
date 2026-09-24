@@ -127,6 +127,24 @@ def inspect_ipa(path: Path, expect_bridge: bool) -> dict[str, Any]:
     return {"main_members": len(mains), "bridge_members": len(bridges)}
 
 
+def extract_for_verification(ipa: Path, destination: Path) -> dict[str, Path]:
+    """Extract the shipped executable and bridge from one packaged IPA."""
+
+    with ZipFile(ipa) as archive:
+        names = set(archive.namelist())
+        if MAIN_MEMBER not in names:
+            raise ValueError(f"{ipa.name} does not carry {MAIN_MEMBER}")
+        destination.mkdir(parents=True, exist_ok=True)
+        main = destination / "nPlayer"
+        main.write_bytes(archive.read(MAIN_MEMBER))
+        extracted = {"main": main}
+        if BRIDGE_MEMBER in names:
+            bridge = destination / "LibASSBridge.dylib"
+            bridge.write_bytes(archive.read(BRIDGE_MEMBER))
+            extracted["bridge"] = bridge
+    return extracted
+
+
 def publish(
     variant: str,
     source_ipa: Path,
@@ -138,3 +156,61 @@ def publish(
         raise ValueError(f"unknown variant: {variant}")
     _require(output.stem == variant, f"output name {output.name} does not match {variant}")
     return package_ipa(source_ipa, output, main, bridge)
+
+
+def publish_app_bundle(bundle: Path, output: Path) -> dict[str, Any]:
+    """Pseudo-sign, package and inspect a standalone app bundle."""
+
+    from . import macho
+
+    binary = bundle / bundle.stem
+    _require(binary.is_file(), f"app binary is missing: {binary}")
+    _require((bundle / "Info.plist").is_file(), "app bundle has no Info.plist")
+    embedded = bundle / "Frameworks" / "LibASSBridge.dylib"
+    _require(embedded.is_file(), f"app bundle has no {embedded.name}")
+    parsed = macho.parse(binary)
+    _require(macho.enum_name(parsed.header.cpu_type).lower() == "arm64", "app is not arm64")
+    minos = macho.version_tuple(parsed.build_version.minos)
+    _require(minos[:2] == [13, 0], f"app target is not iOS 13: {minos}")
+    sign(binary)
+    sign(embedded)
+
+    WORK_ROOT.mkdir(parents=True, exist_ok=True)
+    scratch = WORK_ROOT / f"tree-{output.name}"
+    if scratch.exists():
+        shutil.rmtree(scratch)
+    (scratch / "Payload").mkdir(parents=True)
+    shutil.copytree(bundle, scratch / "Payload" / bundle.name, symlinks=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".tmp-{output.name}")
+    temporary.unlink(missing_ok=True)
+    entries = sorted(path.name for path in scratch.iterdir())
+    try:
+        _run(["/usr/bin/zip", "-q", "-r", "-y", temporary, *entries], cwd=scratch)
+        report = inspect_app_ipa(temporary, bundle.name, binary.name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    os.replace(temporary, output)
+    shutil.rmtree(scratch)
+    report.update(
+        {
+            "artifact": str(output),
+            "variant": output.stem,
+            "main_sha256": _sha256(binary),
+            "bridge_sha256": _sha256(embedded),
+        }
+    )
+    return report
+
+
+def inspect_app_ipa(path: Path, bundle_name: str, binary_name: str) -> dict[str, Any]:
+    app = (Path("Payload") / bundle_name).as_posix()
+    main_member = f"{app}/{binary_name}"
+    bridge_member = f"{app}/Frameworks/LibASSBridge.dylib"
+    with ZipFile(path) as archive:
+        names = archive.namelist()
+    _require(names.count(main_member) == 1, f"{path.name} does not carry {main_member}")
+    _require(names.count(bridge_member) == 1, f"{path.name} does not carry {bridge_member}")
+    _require(f"{app}/Info.plist" in names, f"{path.name} does not carry Info.plist")
+    return {"bundle": app, "main_members": 1, "bridge_members": 1}
