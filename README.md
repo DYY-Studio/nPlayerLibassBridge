@@ -1,25 +1,33 @@
-# nPlayer LibASS Bridge
+# nPlayer iOS LibASS Bridge
+
+> A small tribute to nPlayer, an exceptionally well-designed player that has served us reliably for years.
 
 Replace the bundled libass stack in your own **nPlayer 3.13.0** install with
-libass 0.17.5 — no jailbreak, no inline hooks. The patched IPA gets one added
-dylib and sixteen redirected call sites; the app keeps calling the same fifteen
-libass entry points, which now dispatch into the new library.
+**libass 0.17.5** — 
+no jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great player.
+
+> [!Warning]
+>
+> **Vibe Coding Project**
 
 ## What this does
 
 `npa-patch` takes a decrypted nPlayer IPA you own and writes a patched copy:
 
-- two existing guards are turned into NOPs,
+- two existing guards are turned into NOPs, which fixes that only ASS/SSA of 
+  the first video in the playback sequence can use font attachments in Container (e.g. Matroska).
 - the fifteen libass entry points the app calls are redirected through a small
   payload, which loads `LibASSBridge.dylib` on first use and falls back to the
-  app's own libass if that ever fails,
+  app's own libass if that ever fails, 
 - `Frameworks/LibASSBridge.dylib` is added. It statically links libass 0.17.5,
-  FreeType, HarfBuzz, FriBidi, fontconfig and expat, with no third-party
+  FreeType, **HarfBuzz**, FriBidi, fontconfig and expat, with no third-party
   dynamic dependency,
 - both binaries are pseudo-signed so the bundle loads.
 
 The dylib is built from this repository; only the patch tooling and that dylib
 are distributed. No nPlayer IPA is included.
+
+Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framerate limits.
 
 ## Requirements
 
@@ -44,8 +52,10 @@ git clone <this repository> && cd nplayer-libass-bridge
 uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
-`nPlayer_3.13.0-libass0.17.5.ipa`. Install it with your usual sideload tool or
-LiveContainer; that tool re-signs the whole bundle, which is expected.
+`nPlayer_3.13.0-libass0.17.5.ipa`. Install it with your usual sideload tool (
+[TrollStore](https://github.com/opa334/TrollStore),
+[SideStore](https://github.com/SideStore/SideStore),
+[iloader](https://github.com/nab138/iloader) and more ) or [LiveContainer](https://github.com/LiveContainer/LiveContainer).
 
 Three options exist: `-o/--output`, `--bridge` (default `./LibASSBridge.dylib`)
 and `--manifests` (default `manifests/`). `./npa-patch` at the repository root
@@ -93,6 +103,8 @@ re-check the frozen ABI and re-run the device acceptance.
 ## Legal
 
 This toolchain is MIT licensed (see `LICENSE`); the third-party notices for the
-statically linked libraries are in `THIRD-PARTY.md`. The project is not
+statically linked libraries are in `THIRD-PARTY.md`. 
+
+The project is not
 affiliated with, or endorsed by, the nPlayer authors. You must own a licence
 for nPlayer, and you should patch only your own copy.
