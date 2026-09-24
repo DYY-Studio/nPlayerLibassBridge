@@ -32,8 +32,6 @@ PAGE = 0x4000
 PROTECTION_RX = 5
 PROTECTION_RW = 3
 IPA_MEMBER = "Payload/nPlayer.app/nPlayer"
-NOP_WORD = 0xD503201F
-NOP_SITES = {0x100A0392C: 0x35000148, 0x100ACBC14: 0x37000080}
 STUB_THUNKS = {
     0x1011362CC: bytes.fromhex("302f00f0107640f900021fd6"),
     0x10113629C: bytes.fromhex("302f00f0106640f900021fd6"),
@@ -210,6 +208,12 @@ def provisional_layout(binary: Any) -> PayloadLayout:
     return PayloadLayout(text_vmaddr=text_vmaddr, data_vmaddr=data_vmaddr)
 
 
+def selected_extra_sites(manifest: Manifest, units: Sequence[Unit]):
+    """The extra sites of every dylib the selected units belong to."""
+
+    return manifest.extra_sites([unit.dylib_id for unit in units])
+
+
 def preflight(
     input_path: Path,
     manifest: Manifest,
@@ -237,9 +241,9 @@ def preflight(
             raise ValueError("input already loads the bridge")
     if int(binary.available_command_space) < 128:
         raise ValueError("no load-command space for the weak dependency")
-    for site, expected in NOP_SITES.items():
-        if _word(binary, site) != expected:
-            raise ValueError(f"unexpected instruction at the NOP site {site:#x}")
+    for extra in selected_extra_sites(manifest, units):
+        if _word(binary, extra.site) != extra.expected:
+            raise ValueError(f"unexpected instruction at extra site {extra.site:#x}")
     for stub, thunk in STUB_THUNKS.items():
         content = bytes(binary.get_content_from_virtual_address(stub, len(thunk)))
         if content != thunk:
@@ -399,11 +403,14 @@ def phase_b(
                 target = payload.symbols[f"veneer_{api.symbol}"]
                 write_equal_length(buffer, offset, patch_bl(site, target))
                 writes.append((offset, 4))
-    for site, expected in NOP_SITES.items():
-        offset = int(binary.virtual_address_to_offset(site))
-        if struct.unpack_from("<I", buffer, offset)[0] != expected:
-            raise ValueError(f"NOP site {site:#x} no longer holds the original guard")
-        write_equal_length(buffer, offset, struct.pack("<I", NOP_WORD))
+    extra_sites = selected_extra_sites(manifest, units)
+    for extra in extra_sites:
+        offset = int(binary.virtual_address_to_offset(extra.site))
+        if struct.unpack_from("<I", buffer, offset)[0] != extra.expected:
+            raise ValueError(
+                f"extra site {extra.site:#x} no longer holds the frozen word"
+            )
+        write_equal_length(buffer, offset, struct.pack("<I", extra.replacement))
         writes.append((offset, 4))
 
     _assert_intended_writes(layout_path.read_bytes(), bytes(buffer), writes)
@@ -414,7 +421,7 @@ def phase_b(
         "layout": str(layout_path),
         "output": str(output_path),
         "patched_call_sites": sum(unit.call_site_count for unit in units),
-        "nop_sites": sorted(NOP_SITES),
+        "extra_sites": sorted(extra.site for extra in extra_sites),
         "text_vmaddr": layout.text_vmaddr,
         "data_vmaddr": layout.data_vmaddr,
         "payload_text_size": len(payload.text),

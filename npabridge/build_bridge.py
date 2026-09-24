@@ -16,7 +16,6 @@ from typing import Any
 from . import macho, verify
 from .manifest import Manifest, load_manifest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "bridge" / "npa_ass_bridge.c"
 EXPORT_LIST = ROOT / "bridge" / "bridge.exports"
@@ -28,7 +27,11 @@ INCLUDE_ROOT = ROOT / "build" / "deps" / "include"
 LIB_ROOT = ROOT / "build" / "deps" / "lib"
 MANIFEST_PATH = ROOT / "manifests" / "nplayer-3.13.0.json"
 TARGET = "arm64-apple-ios13.0"
-INSTALL_NAME = verify.BRIDGE_INSTALL_NAME
+DYLIB_ID = "libass"
+
+
+def _manifest() -> Manifest:
+    return load_manifest(MANIFEST_PATH)
 
 
 def _run(command: list[object], cwd: Path | None = None) -> str:
@@ -65,9 +68,9 @@ def nm_exports(path: Path = OUTPUT) -> list[str]:
     return macho.exported_symbols(macho.parse(path))
 
 
-def verify_bridge(path: Path = OUTPUT, manifest: Manifest | None = None) -> dict[str, Any]:
-    manifest = load_manifest(MANIFEST_PATH) if manifest is None else manifest
-    report = verify.verify_bridge(path, manifest)
+def verify_bridge(path: Path = OUTPUT, dylib_id: str = DYLIB_ID) -> dict[str, Any]:
+    manifest = _manifest()
+    report = verify.verify_bridge(path, manifest.dylib(dylib_id))
     report.require()
     report.write(REPORT)
     return report.as_dict()
@@ -111,7 +114,9 @@ def link_bridge(
     output: Path = OUTPUT,
     export_list: Path = EXPORT_LIST,
     object_path: Path = OBJECT,
+    install_name: str | None = None,
 ) -> Path:
+    install_name = install_name or _manifest().dylib(DYLIB_ID).install_name
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
     _run(
@@ -125,7 +130,7 @@ def link_bridge(
             "arm64",
             "-miphoneos-version-min=13.0",
             "-dynamiclib",
-            "-Wl,-install_name," + INSTALL_NAME,
+            "-Wl,-install_name," + install_name,
             "-Wl,-exported_symbols_list," + str(export_list),
             str(object_path),
             *(str(archive) for archive in archives),

@@ -37,7 +37,7 @@ class BridgeLinkTests(unittest.TestCase):
             export_list=mutated_exports,
         )
         self.assertEqual(len(macho.exported_symbols(macho.parse(mutated))), 16)
-        report = verify_bridge(mutated, MANIFEST)
+        report = verify_bridge(mutated, MANIFEST.dylib("libass"))
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("bridge.exports", caught.exception.codes)

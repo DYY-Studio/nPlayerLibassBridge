@@ -10,12 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import macho
-from .manifest import Manifest, Unit, encode_bl
+from .manifest import Dylib, Manifest, Unit, encode_bl
 from .payload import (
     Payload,
     PayloadLayout,
@@ -26,8 +26,6 @@ from .target_abi import TargetABI
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BRIDGE_SOURCE = ROOT / "bridge" / "npa_ass_bridge.c"
-BRIDGE_INSTALL_NAME = "@rpath/LibASSBridge.dylib"
 FORBIDDEN_PATH_PREFIXES = ("/usr/local/", "/opt/homebrew/", "/Users/")
 FORBIDDEN_DEPENDENCY_STEMS = (
     "libass",
@@ -36,6 +34,12 @@ FORBIDDEN_DEPENDENCY_STEMS = (
     "libexpat",
     "libharfbuzz",
     "libfribidi",
+    "libavutil",
+    "libswscale",
+    "libswresample",
+    "libavcodec",
+    "libavformat",
+    "libavfilter",
 )
 FORBIDDEN_CALLBACK_TOKENS = ("va_start", "va_end", "va_copy")
 CALLBACK_ARGS = "void(int, const char *, va_list, void *)"
@@ -61,7 +65,7 @@ class VerificationReport:
     mode: str
     checks: tuple[Check, ...]
     main_sha256: str = ""
-    bridge_sha256: str = ""
+    bridge_sha256s: dict[str, str] = field(default_factory=dict)
     state_initial: int | None = None
 
     @property
@@ -77,7 +81,7 @@ class VerificationReport:
             "artifact": self.artifact,
             "mode": self.mode,
             "main_sha256": self.main_sha256,
-            "bridge_sha256": self.bridge_sha256,
+            "bridge_sha256s": dict(self.bridge_sha256s),
             "state_initial": self.state_initial,
             "checks": [
                 {"code": check.code, "ok": check.ok, "detail": check.detail}
@@ -136,25 +140,27 @@ def _bridge_target(binary: Any) -> str:
     return f"arm64 DYLIB {platform} {minos[0]}.{minos[1]}"
 
 
-def _bridge_exports(binary: Any, manifest: Manifest) -> str:
+def _bridge_exports(binary: Any, dylib: Dylib) -> str:
     exports = macho.exported_symbols(binary)
     expected = sorted(
-        api.macho_name for unit in manifest.units() for api in unit.apis
+        api.macho_name for domain in dylib.domains for api in domain.apis
     )
     _require(exports == expected, f"exports differ: {exports}")
     return f"{len(exports)} underscore-prefixed exports"
 
 
-def _bridge_install_name(path: Path) -> str:
+def _bridge_install_name(path: Path, dylib: Dylib) -> str:
     name = macho.install_name(path)
-    _require(name == BRIDGE_INSTALL_NAME, f"install name is {name}")
+    _require(name == dylib.install_name, f"install name is {name}")
     return name
 
 
-def _bridge_dependencies(path: Path) -> str:
+def _bridge_dependencies(path: Path, dylib: Dylib) -> str:
     dependencies = macho.dependency_lines(path)
-    _require(dependencies.count(BRIDGE_INSTALL_NAME) == 1, "missing self install name")
-    external = [item for item in dependencies if item != BRIDGE_INSTALL_NAME]
+    _require(
+        dependencies.count(dylib.install_name) == 1, "missing self install name"
+    )
+    external = [item for item in dependencies if item != dylib.install_name]
     _require(bool(external), "bridge has no dynamic dependency")
     for dependency in external:
         _require(dependency.startswith("/usr/lib/"), f"non-system dependency: {dependency}")
@@ -178,17 +184,24 @@ def _bridge_initializers(binary: Any) -> str:
     return "no implicit initializers"
 
 
-def _bridge_callback(manifest: Manifest) -> str:
-    _require(manifest.callback.prototype == CALLBACK_ARGS, "manifest callback ABI changed")
-    source = " ".join(BRIDGE_SOURCE.read_text(encoding="utf-8").split())
+def _bridge_callback(dylib: Dylib) -> str:
+    if dylib.callback is None:
+        return "no callback"
+    _require(
+        dylib.build is not None, "a dylib with a callback must declare its build source"
+    )
+    _require(dylib.callback.prototype == CALLBACK_ARGS, "manifest callback ABI changed")
+    source = " ".join(
+        (ROOT / dylib.build.source).read_text(encoding="utf-8").split()
+    )
     _require(CALLBACK_PARAMETER in source, "bridge source lost the four-argument callback")
     for token in FORBIDDEN_CALLBACK_TOKENS:
         _require(token not in source, f"bridge source calls {token}")
     return CALLBACK_ARGS
 
 
-def verify_bridge(path: Path, manifest: Manifest) -> VerificationReport:
-    """Verify one LibASSBridge dylib against the frozen manifest."""
+def verify_bridge(path: Path, dylib: Dylib) -> VerificationReport:
+    """Verify one bridge dylib against its frozen manifest entry."""
 
     path = Path(path).resolve()
     checks = _Checks()
@@ -198,17 +211,17 @@ def verify_bridge(path: Path, manifest: Manifest) -> VerificationReport:
         checks.fail("bridge.macho", str(error))
         return VerificationReport(str(path), "bridge", tuple(checks.checks))
     checks.run("bridge.target", lambda: _bridge_target(binary))
-    checks.run("bridge.exports", lambda: _bridge_exports(binary, manifest))
-    checks.run("bridge.install_name", lambda: _bridge_install_name(path))
-    checks.run("bridge.dependencies", lambda: _bridge_dependencies(path))
+    checks.run("bridge.exports", lambda: _bridge_exports(binary, dylib))
+    checks.run("bridge.install_name", lambda: _bridge_install_name(path, dylib))
+    checks.run("bridge.dependencies", lambda: _bridge_dependencies(path, dylib))
     checks.run("bridge.initializers", lambda: _bridge_initializers(binary))
     checks.run("bridge.host_paths", lambda: _host_paths(path))
-    checks.run("bridge.callback", lambda: _bridge_callback(manifest))
+    checks.run("bridge.callback", lambda: _bridge_callback(dylib))
     return VerificationReport(
         str(path),
         "bridge",
         tuple(checks.checks),
-        bridge_sha256=_sha256(path),
+        bridge_sha256s={dylib.basename: _sha256(path)},
     )
 
 
@@ -344,14 +357,14 @@ def verify_main(
             before,
             after,
             {site for unit in units for api in unit.apis for site in api.call_sites}
-            | set(macho.NOP_SITES),
+            | {extra.site for extra in macho.selected_extra_sites(manifest, units)},
         ),
     )
     checks.run(
         "main.call_sites",
         lambda: _changed_and_patched(patched, after, manifest, abi, units),
     )
-    checks.run("main.nops", lambda: _nops(patched))
+    checks.run("main.extra_sites", lambda: _extra_sites(patched, manifest, units))
     _payload_checks(checks, after, manifest, abi, units)
     state = struct.unpack_from(
         "<I", bytes(after.get_segment(macho.SEGMENT_DATA).content), 0
@@ -481,16 +494,18 @@ def _changed_and_patched(
     return f"{count} redirects"
 
 
-def _nops(patched: Path) -> str:
+def _extra_sites(patched: Path, manifest: Manifest, units: Sequence[Unit]) -> str:
     binary = macho.parse(patched)
     raw = patched.read_bytes()
-    for site in macho.NOP_SITES:
-        offset = int(binary.virtual_address_to_offset(site))
+    selected = macho.selected_extra_sites(manifest, units)
+    for extra in selected:
+        expected = struct.pack("<I", extra.replacement)
+        offset = int(binary.virtual_address_to_offset(extra.site))
         _require(
-            raw[offset : offset + 4] == struct.pack("<I", macho.NOP_WORD),
-            f"NOP site {site:#x} is not patched",
+            raw[offset : offset + 4] == expected,
+            f"extra site {extra.site:#x} is not rewritten",
         )
-    return f"{len(macho.NOP_SITES)} NOPs"
+    return f"{len(selected)} extra sites"
 
 
 def verify_artifact(
@@ -498,19 +513,25 @@ def verify_artifact(
     patched: Path,
     manifest: Manifest,
     units: Sequence[Unit],
-    bridge: Path,
+    bridges: Mapping[str, Path],
     target_abi: TargetABI | None = None,
 ) -> VerificationReport:
-    """Verify one packaged main plus its bridge dylib."""
+    """Verify one packaged main plus every bridge dylib it loads."""
 
     abi = target_abi or manifest.target_abi
     main = verify_main(baseline, patched, manifest, units, abi)
-    bridge_report = verify_bridge(bridge, manifest)
+    checks = main.checks
+    digests: dict[str, str] = {}
+    for dylib_id in dict.fromkeys(unit.dylib_id for unit in units):
+        dylib = manifest.dylib(dylib_id)
+        report = verify_bridge(bridges[dylib_id], dylib)
+        checks = checks + report.checks
+        digests.update(report.bridge_sha256s)
     return VerificationReport(
         artifact=main.artifact,
         mode="bridge",
-        checks=main.checks + bridge_report.checks,
+        checks=checks,
         main_sha256=main.main_sha256,
-        bridge_sha256=bridge_report.bridge_sha256,
+        bridge_sha256s=digests,
         state_initial=main.state_initial,
     )

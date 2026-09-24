@@ -1,6 +1,6 @@
 """Assemble and pseudo-sign a patched IPA.
 
-One artifact exists: a patched main plus the LibASSBridge dylib. Every
+One artifact is a patched main plus the selected bridge dylibs. Every
 artifact is assembled in a scratch tree, signed with ldid and only
 published after its contents were checked.
 """
@@ -13,20 +13,24 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = Path("Payload") / "nPlayer.app"
 MAIN_MEMBER = (APP_DIR / "nPlayer").as_posix()
-BRIDGE_MEMBER = (APP_DIR / "Frameworks" / "LibASSBridge.dylib").as_posix()
+FRAMEWORKS = APP_DIR / "Frameworks"
 LINKEDIT = "ldid"
 TOOL_HINTS = {
     "ldid": "brew install ldid on macOS, or your distribution's ldid build",
     "zip": "macOS ships /usr/bin/zip; on Linux install zip",
     "unzip": "macOS ships /usr/bin/unzip; on Linux install unzip",
 }
+
+
+def bridge_member(basename: str) -> str:
+    return (FRAMEWORKS / basename).as_posix()
 
 
 def _require(condition: bool, message: str) -> None:
@@ -75,11 +79,13 @@ def package_ipa(
     source_ipa: Path,
     output: Path,
     main: Path,
-    bridge: Path,
+    bridges: Mapping[str, Path],
     work: Path | None = None,
 ) -> dict[str, Any]:
     """Assemble, pseudo-sign and publish one patched IPA."""
 
+    if not bridges:
+        raise ValueError("no bridge dylib was selected")
     created_scratch = work is None
     scratch_root = Path(work) if work is not None else Path(tempfile.mkdtemp(prefix="npa-patch-"))
     try:
@@ -96,17 +102,18 @@ def package_ipa(
                 f"source IPA carries {frameworks.name} as a file, not a directory"
             )
         frameworks.mkdir(exist_ok=True)
-        target = frameworks / "LibASSBridge.dylib"
-        shutil.copy2(bridge, target)
-        target.chmod(0o755)
-        sign(target)
+        for basename, bridge in bridges.items():
+            target = frameworks / basename
+            shutil.copy2(bridge, target)
+            target.chmod(0o755)
+            sign(target)
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f".tmp-{output.name}")
         temporary.unlink(missing_ok=True)
         entries = sorted(path.name for path in scratch.iterdir())
         try:
             _run([_tool("zip"), "-q", "-r", "-y", temporary, *entries], cwd=scratch)
-            report = inspect_ipa(temporary)
+            report = inspect_ipa(temporary, tuple(bridges))
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
@@ -119,24 +126,37 @@ def package_ipa(
         {
             "artifact": str(output),
             "main_sha256": _sha256(main),
-            "bridge_sha256": _sha256(bridge),
+            "bridge_sha256s": {
+                basename: _sha256(bridge) for basename, bridge in bridges.items()
+            },
         }
     )
     return report
 
 
-def inspect_ipa(path: Path) -> dict[str, Any]:
+def inspect_ipa(path: Path, basenames: tuple[str, ...]) -> dict[str, Any]:
+    if not basenames:
+        raise ValueError("no bridge dylib was selected")
     with ZipFile(path) as archive:
         names = archive.namelist()
     mains = [name for name in names if name == MAIN_MEMBER]
-    bridges = [name for name in names if name == BRIDGE_MEMBER]
     _require(len(mains) == 1, f"{path.name} carries {len(mains)} main executables")
-    _require(len(bridges) == 1, f"{path.name} carries {len(bridges)} bridge dylibs")
-    return {"main_members": len(mains), "bridge_members": len(bridges)}
+    bridges: dict[str, int] = {}
+    for basename in basenames:
+        member = bridge_member(basename)
+        found = [name for name in names if name == member]
+        _require(
+            len(found) == 1,
+            f"{path.name} carries {len(found)} copies of {basename}",
+        )
+        bridges[basename] = len(found)
+    return {"main_members": len(mains), "bridge_members": bridges}
 
 
-def extract_for_verification(ipa: Path, destination: Path) -> dict[str, Path]:
-    """Extract the shipped executable and bridge from one packaged IPA."""
+def extract_for_verification(
+    ipa: Path, destination: Path, basenames: tuple[str, ...]
+) -> dict[str, Path]:
+    """Extract the shipped executable and bridge dylibs from one packaged IPA."""
 
     with ZipFile(ipa) as archive:
         names = set(archive.namelist())
@@ -146,10 +166,12 @@ def extract_for_verification(ipa: Path, destination: Path) -> dict[str, Path]:
         main = destination / "nPlayer"
         main.write_bytes(archive.read(MAIN_MEMBER))
         extracted = {"main": main}
-        if BRIDGE_MEMBER in names:
-            bridge = destination / "LibASSBridge.dylib"
-            bridge.write_bytes(archive.read(BRIDGE_MEMBER))
-            extracted["bridge"] = bridge
+        for basename in basenames:
+            member = bridge_member(basename)
+            if member in names:
+                bridge = destination / basename
+                bridge.write_bytes(archive.read(member))
+                extracted[basename] = bridge
     return extracted
 
 
@@ -157,6 +179,6 @@ def publish(
     source_ipa: Path,
     output: Path,
     main: Path,
-    bridge: Path,
+    bridges: Mapping[str, Path],
 ) -> dict[str, Any]:
-    return package_ipa(source_ipa, output, main, bridge)
+    return package_ipa(source_ipa, output, main, bridges)

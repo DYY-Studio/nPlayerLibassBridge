@@ -87,6 +87,49 @@ def _cmp_w5_immediates(code):
     return result
 
 
+def _words_at(code, layout, address, count):
+    offset = address - layout.text_vmaddr
+    return [
+        struct.unpack_from("<I", code, offset + 4 * index)[0]
+        for index in range(count)
+    ]
+
+
+def _adrp_target(word, address):
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    page = ((immhi << 2) | immlo) << 12
+    if page & (1 << 32):
+        page -= 1 << 33
+    return (address & ~0xFFF) + page
+
+
+def _add_immediate(word):
+    if word & 0xFFC00000 != 0x91000000:
+        raise AssertionError(f"not an ADD immediate: {word:#010x}")
+    return (word >> 10) & 0xFFF
+
+
+def _unsigned_offset(word):
+    if word & 0xFFC00000 not in (0xF9400000, 0xF9000000):
+        raise AssertionError(f"not an LDR/STR unsigned offset: {word:#010x}")
+    return ((word >> 10) & 0xFFF) * 8
+
+
+def _encoded_slot_address(payload, layout, symbol, kind):
+    """The address `adrp/add` + `ldr/str` resolve to for one unit slot access."""
+
+    if kind == "load":
+        block = payload.symbols[f"new_{symbol}"]
+        words = _words_at(payload.text, layout, block, 3)
+        adrp, add, access = words
+    else:
+        block = payload.symbols[f"store_{symbol}"]
+        words = _words_at(payload.text, layout, block, 4)
+        adrp, add, access = words[1], words[2], words[3]
+    return _adrp_target(adrp, block) + _add_immediate(add) + _unsigned_offset(access)
+
+
 def _basename_occurrences(immediates, basename):
     expected = [ord(character) for character in basename]
     return sum(
@@ -272,6 +315,19 @@ class MultiUnitPayloadTests(unittest.TestCase):
                     _basename_occurrences(immediates, unit.basename),
                     unit.symbol_count,
                 )
+
+    def test_every_slot_access_resolves_to_its_own_slot(self):
+        for unit_name, unit in [(unit.id, unit) for unit in self.units]:
+            for index, api in enumerate(unit.apis):
+                expected = self.payload.symbols[f"slots_{unit_name}"] + 8 * index
+                for kind in ("load", "store"):
+                    with self.subTest(unit=unit_name, symbol=api.symbol, kind=kind):
+                        self.assertEqual(
+                            _encoded_slot_address(
+                                self.payload, self.layout, api.symbol, kind
+                            ),
+                            expected,
+                        )
 
     def test_data_grows_with_the_second_unit(self):
         expected = sum(8 + 8 * unit.symbol_count for unit in self.units)

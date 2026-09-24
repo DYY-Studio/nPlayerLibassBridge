@@ -4,20 +4,27 @@ import struct
 import tempfile
 import unittest
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from zipfile import ZipFile
 
 from npabridge import package, patch
-from npabridge.manifest import select_manifest
+from npabridge.manifest import Domain, Dylib, select_manifest
 from npabridge.verify import VerificationError
 
 from support import ROOT, SOURCE_IPA
 
 
 MANIFESTS = ROOT / "manifests"
-BRIDGE = ROOT / "build" / "LibASSBridge.dylib"
+BUILD = ROOT / "build"
+BRIDGE = BUILD / "LibASSBridge.dylib"
+BASENAME = "LibASSBridge.dylib"
 # the main member of the device-accepted bridge.ipa, signed under the name nPlayer
 PACKAGED_MAIN_SHA256 = "19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887"
+
+
+def _patched(source, output, work, **keywords):
+    return patch.patch_ipa(source, output, BUILD, MANIFESTS, work=work, **keywords)
 
 
 class PatchFlowTests(unittest.TestCase):
@@ -27,19 +34,17 @@ class PatchFlowTests(unittest.TestCase):
             raise unittest.SkipTest("source IPA is not present")
         if not BRIDGE.is_file():
             raise unittest.SkipTest("LibASSBridge.dylib is not built")
-        cls.work = ROOT / "build" / "patch" / "test"
+        cls.work = BUILD / "patch" / "test"
         cls.work.mkdir(parents=True, exist_ok=True)
 
     def test_patch_writes_the_default_name_and_the_known_packaged_main(self):
         expected = SOURCE_IPA.with_name(f"{SOURCE_IPA.stem}-libass0.17.5.ipa")
         expected.unlink(missing_ok=True)
         try:
-            result = patch.patch_ipa(
-                SOURCE_IPA, None, BRIDGE, MANIFESTS, work=self.work / "run"
-            )
+            result = _patched(SOURCE_IPA, None, self.work / "run")
             self.assertEqual(result.output, expected.resolve())
             self.assertEqual(result.app_version, "3.13.0")
-            self.assertEqual(result.libass_version, "0.17.5")
+            self.assertEqual(result.dylibs, ("libass",))
             self.assertEqual(result.state_initial, 0)
             self.assertGreater(result.checks_passed, 0)
             with ZipFile(result.output) as archive:
@@ -53,21 +58,66 @@ class PatchFlowTests(unittest.TestCase):
         output.unlink(missing_ok=True)
         temp_root = Path(tempfile.gettempdir())
         before = set(temp_root.glob("npa-patch-*"))
-        result = patch.patch_ipa(SOURCE_IPA, output, BRIDGE, MANIFESTS)
+        result = patch.patch_ipa(SOURCE_IPA, output, BUILD, MANIFESTS)
         self.assertEqual(set(temp_root.glob("npa-patch-*")), before)
         self.assertEqual(result.packaged_main_sha256, PACKAGED_MAIN_SHA256)
+        self.assertEqual(
+            set(result.bridge_sha256s), {"LibASSBridge.dylib"}
+        )
         self.assertTrue(output.is_file())
 
+    def test_explicit_selection_still_names_the_chosen_dylib(self):
+        output = self.work / "only-libass.ipa"
+        output.unlink(missing_ok=True)
+        result = _patched(SOURCE_IPA, output, self.work / "only", dylibs=["libass"])
+        self.assertEqual(result.dylibs, ("libass",))
+        self.assertTrue(output.is_file())
+
+    def test_unknown_dylib_id_is_rejected(self):
+        with self.assertRaises(KeyError):
+            _patched(
+                SOURCE_IPA,
+                self.work / "unknown.ipa",
+                self.work / "unknown",
+                dylibs=["ffmpeg"],
+            )
+
+    def test_default_output_name_follows_the_manifest_order(self):
+        manifest = _manifest_with_two_dylibs()
+        units = manifest.units()
+        self.assertEqual(
+            patch.default_output_name(SOURCE_IPA, manifest, units).name,
+            "nPlayer_3.13.0-libass0.17.5-other1.0.0.ipa",
+        )
+        self.assertEqual(
+            patch.default_output_name(
+                SOURCE_IPA, manifest, manifest.units(("other",))
+            ).name,
+            "nPlayer_3.13.0-other1.0.0.ipa",
+        )
+
     def test_refuses_to_overwrite_the_bridge_dylib(self):
-        dylib = self.work / "LibASSBridge.dylib"
+        directory = self.work / "overwrite-bridge"
+        directory.mkdir(parents=True, exist_ok=True)
+        dylib = directory / BASENAME
         shutil.copy2(BRIDGE, dylib)
         before = hashlib.sha256(dylib.read_bytes()).hexdigest()
         with self.assertRaises(ValueError) as caught:
             patch.patch_ipa(
-                SOURCE_IPA, dylib, dylib, MANIFESTS, work=self.work / "overwrite"
+                SOURCE_IPA, dylib, directory, MANIFESTS, work=self.work / "overwrite"
             )
         self.assertIn("bridge", str(caught.exception).lower())
         self.assertEqual(hashlib.sha256(dylib.read_bytes()).hexdigest(), before)
+
+    def test_missing_bridge_dylib_is_reported(self):
+        missing = self.work / "no-dylibs-here"
+        missing.mkdir(parents=True, exist_ok=True)
+        with self.assertRaises(FileNotFoundError) as caught:
+            patch.patch_ipa(
+                SOURCE_IPA, self.work / "missing.ipa", missing, MANIFESTS,
+                work=self.work / "missing-work",
+            )
+        self.assertIn(BASENAME, str(caught.exception))
 
     def test_unsupported_version_lists_the_supported_one(self):
         unknown = self.work / "unknown-main"
@@ -83,22 +133,23 @@ class PatchFlowTests(unittest.TestCase):
         self._write_ipa_with_crypt_id(SOURCE_IPA, encrypted, 1)
         output = self.work / "encrypted-out.ipa"
         with self.assertRaises(ValueError) as caught:
-            patch.patch_ipa(
-                encrypted, output, BRIDGE, MANIFESTS, work=self.work / "encrypted-work"
-            )
+            _patched(encrypted, output, self.work / "encrypted-work")
         self.assertIn("encrypted", str(caught.exception).lower())
         self.assertFalse(output.exists())
 
     def test_invalid_bridge_is_rejected_by_name(self):
-        not_a_bridge = package.extract_for_verification(
-            SOURCE_IPA, self.work / "bad-bridge"
-        )["main"]
+        directory = self.work / "bad-bridge-dir"
+        extracted = package.extract_for_verification(
+            SOURCE_IPA, self.work / "bad-bridge", (BASENAME,)
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(extracted["main"], directory / BASENAME)
         output = self.work / "bad-bridge.ipa"
         with self.assertRaises(VerificationError) as caught:
             patch.patch_ipa(
-                SOURCE_IPA, output, not_a_bridge, MANIFESTS, work=self.work / "bad-work"
+                SOURCE_IPA, output, directory, MANIFESTS, work=self.work / "bad-work"
             )
-        self.assertIn("bridge.exports", caught.exception.codes)
+        self.assertIn("bridge.target", caught.exception.codes)
         self.assertFalse(output.exists())
 
     def _write_ipa_with_crypt_id(self, source: Path, output: Path, crypt_id: int) -> None:
@@ -126,6 +177,20 @@ class PatchFlowTests(unittest.TestCase):
             warnings.simplefilter("ignore", UserWarning)
             with ZipFile(output, "a") as archive:
                 archive.write(main, patch.MAIN_MEMBER)
+
+
+def _manifest_with_two_dylibs():
+    from npabridge.manifest import load_manifest
+
+    manifest = load_manifest(MANIFESTS / "nplayer-3.13.0.json")
+    other = Dylib(
+        id="other",
+        library_version="1.0.0",
+        basename="LibOtherBridge.dylib",
+        domains=(Domain(id="other", apis=manifest.dylib("libass").domains[0].apis[:1]),),
+        extra_sites=(),
+    )
+    return replace(manifest, dylibs=manifest.dylibs + (other,))
 
 
 if __name__ == "__main__":

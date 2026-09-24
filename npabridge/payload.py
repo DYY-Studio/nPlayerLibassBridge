@@ -64,14 +64,15 @@ class _UnitData:
     unit: Unit
     base: int
     state_lo: int
-    slots_lo: int
 
     @property
     def size(self) -> int:
         return _UNIT_HEADER_SIZE + _SLOT_SIZE * self.unit.symbol_count
 
-    def slot_lo(self, index: int) -> int:
-        return self.slots_lo + _SLOT_SIZE * index
+    def slot_offset(self, index: int) -> int:
+        """Slot `index`, relative to the address `state_lo` lowers to."""
+
+        return _UNIT_HEADER_SIZE + _SLOT_SIZE * index
 
 
 def _align(value: int, alignment: int) -> int:
@@ -216,7 +217,6 @@ def _unit_data(units: Sequence[Unit], data_vmaddr: int) -> tuple[_UnitData, ...]
                 unit=unit,
                 base=base,
                 state_lo=data_lo + base,
-                slots_lo=data_lo + base + _UNIT_HEADER_SIZE,
             )
         )
     total = data_size(units)
@@ -312,7 +312,7 @@ def _veneer_blocks(
             (
                 f"{new}:",
                 *_state_lines("x15", data_page, data.state_lo),
-                f"  ldr x9, [x15, #{data.slot_lo(index)}]",
+                f"  ldr x9, [x15, #{data.slot_offset(index)}]",
                 "  br x9",
             ),
         ),
@@ -471,8 +471,8 @@ def _resolve_block(
             (
                 f"{store}:",
                 f"  ldr x3, [sp, #{_CANDIDATE_OFFSET}]",
-                *_state_lines("x15", data_page, data.slots_lo),
-                f"  str x3, [x15, #{data.slot_lo(index)}]",
+                *_state_lines("x15", data_page, data.state_lo),
+                f"  str x3, [x15, #{data.slot_offset(index)}]",
                 _branch(
                     "b",
                     addresses,
