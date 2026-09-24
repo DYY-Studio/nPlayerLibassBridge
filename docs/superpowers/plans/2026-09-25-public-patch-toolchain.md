@@ -49,8 +49,8 @@
 | `npabridge/build_bridge.py`、`npabridge/toolchain.py` | 从源码构建 dylib 与 host Keystone（dev 路径） | 不动 |
 | `tools/patch.py` | 薄入口，转发到 `npabridge.patch:main` | 新建 |
 | `npa-patch` | 仓库根入口脚本（`uv run --no-dev python tools/patch.py`） | 新建 |
-| `tools/doctor.py` | 只检查 patch 真正需要的外部工具 | 修改 |
-| `tools/verify.py` | 校验构建产物 + 合并 `dev/acceptance.json`（dev 用） | 修改 |
+| `tools/doctor.py` | —— | 删除（依赖缺失已由 `npa-patch` 的报错提示覆盖） |
+| `tools/verify.py` | —— | 删除（dev 侧用 `build_bridge --verify-only`，成品校验在 `npa-patch` 内完成） |
 | `manifests/nplayer-3.13.0.json` | 版本锚点 + 冻结的 `target_abi` + `app_version`/`libass_version` | 修改 |
 | `pyproject.toml` | 加 `[project.scripts] npa-patch` | 修改 |
 | `Makefile` | 收敛为 dev 目标：bootstrap/deps/bridge/verify/test/smoke | 修改 |
@@ -87,7 +87,7 @@ if not SOURCE_IPA.is_file():
 
 **Files:**
 - Modify: `npabridge/macho.py:157-193`（`_otool`、`xcrun_find`、`dependency_lines`、`install_name`）
-- Test: `tests/test_macho_metadata.py`（新建）
+- Test: `tests/test_bridge.py`（在既有文件内加一个测试）
 
 **Interfaces:**
 - Consumes: `npabridge.macho.parse(path) -> ParsedMachO`（属性 `lief` 是 LIEF binary，容器被持有）
@@ -95,28 +95,15 @@ if not SOURCE_IPA.is_file():
 
 - [ ] **Step 1: 写失败测试**
 
+在既有 `tests/test_bridge.py` 里追加一个方法（该文件已有"dylib 未构建就 skip"的 `setUpClass` 逻辑，直接复用）：
+
 ```python
-# tests/test_macho_metadata.py
-import unittest
-from pathlib import Path
-
-from npabridge import macho
-
-ROOT = Path(__file__).resolve().parents[1]
-BUILD = ROOT / "build"
-BRIDGE = BUILD / "LibASSBridge.dylib"
-
-
-class MetadataTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        if not BRIDGE.is_file():
-            raise unittest.SkipTest("LibASSBridge.dylib is not built")
-
-    def test_install_name_and_dependencies_match_the_built_bridge(self):
-        self.assertEqual(macho.install_name(BRIDGE), "@rpath/LibASSBridge.dylib")
+    def test_metadata_helpers_match_the_built_bridge(self):
+        if not OUTPUT.is_file():
+            self.skipTest("LibASSBridge.dylib is not built")
+        self.assertEqual(macho.install_name(OUTPUT), "@rpath/LibASSBridge.dylib")
         self.assertEqual(
-            macho.dependency_lines(BRIDGE),
+            macho.dependency_lines(OUTPUT),
             [
                 "@rpath/LibASSBridge.dylib",
                 "/usr/lib/libiconv.2.dylib",
@@ -124,26 +111,14 @@ class MetadataTests(unittest.TestCase):
                 "/usr/lib/libSystem.B.dylib",
             ],
         )
-
-    def test_dependency_lines_follow_otool_when_otool_is_available(self):
-        import shutil
-        import subprocess
-
-        otool = shutil.which("otool") or "/usr/bin/xcrun"
-        if not Path(otool).is_file():
-            self.skipTest("otool is not available")
-        command = [otool, "-L", str(BRIDGE)] if otool.endswith("otool") else ["/usr/bin/xcrun", "otool", "-L", str(BRIDGE)]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            self.skipTest("otool is not usable")
-        expected = [line.split()[0] for line in result.stdout.splitlines()[1:] if line.strip()]
-        self.assertEqual(macho.dependency_lines(BRIDGE), expected)
 ```
+
+文件头补 `from npabridge import macho`（`from npabridge.macho import ...` 亦可）。
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `uv run pytest tests/test_macho_metadata.py -v`
-Expected: 失败或报错——当前 `dependency_lines` 走 `/usr/bin/xcrun otool`。
+Run: `uv run pytest tests/test_bridge.py -v`
+Expected: 新增方法失败或报错——当前 `dependency_lines` 走 `/usr/bin/xcrun otool`。
 
 - [ ] **Step 3: 实现 LIEF 版本**
 
@@ -171,13 +146,13 @@ def install_name(path: Path) -> str:
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `uv run pytest tests/test_macho_metadata.py tests/test_verify.py tests/test_bridge.py -v`
-Expected: PASS（`test_bridge.py` 的 7 个 bridge check 仍全绿）。
+Run: `uv run pytest tests/test_bridge.py tests/test_verify.py -v`
+Expected: PASS（`test_bridge.py` 的 7 个 bridge check 与新方法全绿，且不再调用 `otool`）。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add npabridge/macho.py tests/test_macho_metadata.py
+git add npabridge/macho.py tests/test_bridge.py
 git commit -m "refactor: read dylib metadata through LIEF
 
 Co-authored-by: Codex <codex@openai.com>"
@@ -192,7 +167,7 @@ Co-authored-by: Codex <codex@openai.com>"
 - Create: `dev/abi_probe.py`（探针编译与读取；由 `npabridge/target_abi.py` 拆出）
 - Move: `tools/target_abi_probe.c` → `dev/target_abi_probe.c`
 - Modify: `npabridge/manifest.py`、`npabridge/macho.py:277-350,383-453`、`npabridge/verify.py`、`manifests/nplayer-3.13.0.json`
-- Test: `tests/test_manifest.py`（增加断言）、`dev/tests/test_abi_probe.py`（新建）
+- Test: `tests/test_manifest.py`（增加断言）
 
 **Interfaces:**
 - Produces: `manifest.Manifest` 新增字段 `app_version: str`、`libass_version: str`、`target_abi: TargetABI`；`target_abi.from_manifest(data: dict) -> TargetABI`；`dev/abi_probe.py` 的 `load_target_abi(sdk: Path) -> TargetABI`（dev 校验用）
@@ -216,7 +191,7 @@ print(abi)
 
 ```python
 # tests/test_manifest.py 追加（放在已有 ManifestTests 内）
-    def test_manifest_declares_version_and_frozen_abi(self):
+    def test_manifest_declares_the_version_and_the_frozen_abi(self):
         manifest = load_manifest(MANIFEST)
         self.assertEqual(manifest.app_version, "3.13.0")
         self.assertEqual(manifest.libass_version, "0.17.5")
@@ -232,14 +207,6 @@ print(abi)
             (0, 8, 16, 24),
         )
         self.assertEqual(manifest.target_abi.rtld_default_masked, (1 << 64) - 2)
-
-    def test_manifest_libass_version_matches_the_pinned_source(self):
-        import json
-
-        lock = json.loads((ROOT / "deps" / "sources.lock.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            load_manifest(MANIFEST).libass_version, lock["sources"]["libass"]["version"]
-        )
 ```
 
 - [ ] **Step 3: 冻结 ABI 到 manifest 并让 patch 路径不再调用 xcrun**
@@ -302,28 +269,13 @@ def from_manifest(data: dict) -> TargetABI:
     return abi
 ```
 
-`load_target_abi`、`_compile_probe`、`_probe_paths`、`_read_symbol`、`REQUIRED_SYMBOLS` 整体移入 `dev/abi_probe.py`（`ROOT` 改为 `parents[1]`，探针源路径改为 `dev/target_abi_probe.c`，`build/abi_probe.o` 作输出），并新增一个打印 manifest 片段的 `--emit`：
+`load_target_abi`、`_compile_probe`、`_probe_paths`、`_read_symbol`、`REQUIRED_SYMBOLS` 整体移入 `dev/abi_probe.py`（`ROOT` 改为 `parents[1]`，探针源路径改为 `dev/target_abi_probe.c`，`build/abi_probe.o` 作输出），并保留一个三行 `__main__`，用于把当前 SDK 的实测值打出来人工比对：
 
 ```python
 if __name__ == "__main__":
-    import json
-    import sys
-
     from npabridge import macho
 
-    abi = load_target_abi(macho.sdk_path())
-    print(json.dumps({
-        "platform": abi.platform,
-        "minos": list(abi.minos),
-        "sdk": list(abi.sdk),
-        "dl_info_size": abi.dl_info_size,
-        "dl_info_fname_offset": abi.dl_info_fname_offset,
-        "dl_info_fbase_offset": abi.dl_info_fbase_offset,
-        "dl_info_sname_offset": abi.dl_info_sname_offset,
-        "dl_info_saddr_offset": abi.dl_info_saddr_offset,
-        "rtld_default_masked": hex(abi.rtld_default_masked),
-    }, indent=2, sort_keys=True))
-    sys.exit(0)
+    print(load_target_abi(macho.sdk_path()))
 ```
 
 `npabridge/manifest.py`：`Manifest` 增加 `app_version`、`libass_version`、`target_abi` 三个字段并在 `load_manifest` 里填充（`target_abi=target_abi.from_manifest(data["target_abi"])`）。
@@ -355,7 +307,7 @@ Co-authored-by: Codex <codex@openai.com>"
 ### Task 3: 收窄到单产物
 
 **Files:**
-- Modify: `npabridge/package.py`、`npabridge/verify.py`、`tools/verify.py`、`Makefile`、`tools/package.py`（删除）
+- Modify: `npabridge/package.py`、`npabridge/verify.py`、`Makefile`；删除：`tools/package.py`、`tools/verify.py`
 - Test: `tests/test_package.py`、`tests/test_verify.py`
 
 **Interfaces:**
@@ -416,7 +368,7 @@ Expected: 失败（`publish` 仍要求 variant、`verify_artifact` 仍带 mode�
 
 `npabridge/package.py`：
 - 删除 `VARIANTS`、`SOURCE_IPA`、`publish()` 的 `variant` 参数与 `_require(output.stem == variant, ...)`；`package_ipa` 的 `mode` 固定为 `"bridge"`；`inspect_ipa(path)` 不再需要 `expect_bridge` 参数（永远要求 1 个 bridge）。
-- `WORK_ROOT` 改为 `ROOT / "build" / "patch"`；`DIST` 删除（输出由调用方给）。
+- `WORK_ROOT`/`DIST` 删除：`package_ipa(source, output, main, bridge, work=None)` 增加 `work: Path | None`，缺省 `tempfile.mkdtemp(prefix="npa-patch-")`，成功后清理、失败时保留并打印路径——公开工具不得把临时文件写回仓库或用户 IPA 目录。`publish_app_bundle`（dev smoke 用）继续用 `ROOT / "build" / "patch"`。
 - `sign()` 与打包用的 `zip`/`unzip` 改为按 PATH 解析并给出可执行的报错：
 
 ```python
@@ -434,7 +386,7 @@ def _tool(name: str, hint: str) -> str:
 - `verify_artifact(baseline, patched, manifest, bridge, target_abi=None)`：`bridge` 必填；返回的 `VerificationReport.mode` 固定 `"bridge"`。
 - `VerificationReport.write()` 保留（dev 报告用）。
 
-`tools/verify.py`：`--all` 改为校验 `dist/bridge.ipa`（或 `--ipa`）单个产物；移除 `--baseline` 模式推断；保留把 `dev/acceptance.json` 合并进报告的 `load_acceptance()`（Task 6 里改路径）。
+`tools/verify.py` 直接删除：dev 侧校验 dylib 用 `uv run python -m npabridge.build_bridge --verify-only`，成品校验由 `npa-patch` 内部完成（失败即不发布）。
 
 `Makefile`：删除 `baseline`/`weak-load-only`/`fallback`/`dist` 目标与 `tools/package.py`；`smoke` 指向 `dev/tools/smoke.py`（Task 6 后生效）：
 
@@ -452,7 +404,7 @@ bridge:
 	$(UV) run python -m npabridge.build_bridge
 
 verify:
-	$(UV) run python tools/verify.py
+	$(UV) run python -m npabridge.build_bridge --verify-only
 
 test:
 	$(UV) run pytest
@@ -469,7 +421,7 @@ clean:
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `uv run pytest -q`
-Expected: PASS；`uv run python tools/verify.py --ipa dist/bridge.ipa` 全绿。
+Expected: PASS；`uv run python -m npabridge.build_bridge --verify-only` 的 7 个 bridge check 全绿。
 
 - [ ] **Step 5: 提交**
 
@@ -492,10 +444,10 @@ Co-authored-by: Codex <codex@openai.com>"
 **Interfaces:**
 - Consumes: Task 1 的元数据 helper、Task 2 的 `Manifest.target_abi`、Task 3 的 `package.publish` / `verify.verify_artifact` / `verify.verify_bridge`
 - Produces:
-  - `manifest.select_manifest(directory: Path, main: Path) -> tuple[Manifest, Path]`（按 `main_sha256` 匹配，失败抛 `ValueError` 并列出已支持版本）
+  - `manifest.select_manifest(directory: Path, main: Path) -> Manifest`（按 `main_sha256` 匹配，失败抛 `ValueError` 并列出已支持版本）
   - `patch.patch_ipa(source: Path, output: Path | None, bridge: Path, manifests: Path, work: Path | None = None) -> PatchResult`（`output=None` 时按 `<输入名>-libass<版本>.ipa` 命名）
   - `patch.main(argv: list[str] | None = None) -> int`
-  - `patch.PatchResult`（`source`、`output`、`app_version`、`libass_version`、`manifest`、`bridge`、`source_main_sha256`、`patched_main_sha256`、`packaged_main_sha256`、`bridge_sha256`、`state_initial`、`checks`）
+  - `patch.PatchResult`（`source`、`output`、`app_version`、`libass_version`、`source_main_sha256`、`packaged_main_sha256`、`bridge_sha256`、`state_initial`、`checks_passed`）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -660,14 +612,11 @@ class PatchResult:
     output: Path
     app_version: str
     libass_version: str
-    manifest: Path
-    bridge: Path
     source_main_sha256: str
-    patched_main_sha256: str
     packaged_main_sha256: str
     bridge_sha256: str
     state_initial: int
-    checks: tuple[dict, ...]
+    checks_passed: int
 
     def as_dict(self) -> dict:
         return {
@@ -675,14 +624,11 @@ class PatchResult:
             "output": str(self.output),
             "app_version": self.app_version,
             "libass_version": self.libass_version,
-            "manifest": str(self.manifest),
-            "bridge": str(self.bridge),
             "source_main_sha256": self.source_main_sha256,
-            "patched_main_sha256": self.patched_main_sha256,
             "packaged_main_sha256": self.packaged_main_sha256,
             "bridge_sha256": self.bridge_sha256,
             "state_initial": self.state_initial,
-            "checks": [dict(check) for check in self.checks],
+            "checks_passed": self.checks_passed,
         }
 
 
@@ -728,7 +674,7 @@ def patch_ipa(source, output, bridge, manifests, work=None) -> PatchResult:
     source_main = _extract_main(source, work / "source-main")
     source_digest = _sha256(source_main)
     _reject_encrypted(source_main)
-    manifest, manifest_path = select_manifest(manifests, source_main)
+    manifest = select_manifest(manifests, source_main)
     macho.preflight(source_main, manifest)
 
     output = (
@@ -749,7 +695,9 @@ def patch_ipa(source, output, bridge, manifests, work=None) -> PatchResult:
     temporary = output.with_name(f".tmp-{output.name}")
     temporary.unlink(missing_ok=True)
     try:
-        package.package_ipa(source, temporary, work / "main-phase-b", bridge)
+        package.package_ipa(
+            source, temporary, work / "main-phase-b", bridge, work=work / "package"
+        )
         extracted = package.extract_for_verification(temporary, work / "shipped")
         report = verify.verify_artifact(
             source_main, extracted["main"], manifest, extracted["bridge"]
@@ -766,14 +714,11 @@ def patch_ipa(source, output, bridge, manifests, work=None) -> PatchResult:
         output=output,
         app_version=manifest.app_version,
         libass_version=manifest.libass_version,
-        manifest=manifest_path,
-        bridge=bridge,
         source_main_sha256=source_digest,
-        patched_main_sha256=_sha256(work / "main-phase-b"),
         packaged_main_sha256=_sha256(extracted["main"]),
         bridge_sha256=_sha256(extracted["bridge"]),
         state_initial=report.state_initial,
-        checks=tuple(check.as_dict() for check in report.checks),
+        checks_passed=len(report.checks),
     )
 ```
 
@@ -831,7 +776,7 @@ Co-authored-by: Codex <codex@openai.com>"
 
 **Files:**
 - Create: `tools/patch.py`、`npa-patch`
-- Modify: `pyproject.toml`、`tools/doctor.py`
+- Modify: `pyproject.toml`；删除：`tools/doctor.py`
 
 **Interfaces:**
 - Consumes: `npabridge.patch.main`
@@ -878,15 +823,7 @@ exec uv run --no-dev python "$here/tools/patch.py" "$@"
 npa-patch = "npabridge.patch:main"
 ```
 
-`tools/doctor.py`：`TOOLS` 改为 `("ldid", "zip", "unzip")`，删除 `ios_sdk_path()` 与 `xcrun`/`clang`/`cmake`/`ninja` 检查，缺失时打印具体安装提示：
-
-```python
-HINTS = {
-    "ldid": "brew install ldid",
-    "zip": "macOS ships /usr/bin/zip; on Linux install zip",
-    "unzip": "macOS ships /usr/bin/unzip; on Linux install unzip",
-}
-```
+`tools/doctor.py` 删除：`ldid`/`zip`/`unzip` 缺失时的安装提示由 Task 3 的 `_tool()` 直接给出，不再维护第二份依赖清单。
 
 - [ ] **Step 2: 验证三个入口**
 
@@ -895,14 +832,13 @@ Run:
 uv run python tools/patch.py --help >/dev/null && echo "tools/patch ok"
 ./npa-patch --help >/dev/null && echo "root entry ok"
 uv run npa-patch --help >/dev/null && echo "console script ok"
-uv run python tools/doctor.py
 ```
-Expected: 前三行 ok；doctor 列出 ldid/zip/unzip 均为路径（`required=ok`）。
+Expected: 三行 ok，且三者的 `--help` 文本一致。
 
 - [ ] **Step 3: 提交**
 
 ```bash
-git add pyproject.toml tools/patch.py tools/doctor.py npa-patch
+git add -A pyproject.toml tools npa-patch
 git commit -m "feat: expose the patch flow through three entry points
 
 Co-authored-by: Codex <codex@openai.com>"
@@ -917,7 +853,7 @@ Co-authored-by: Codex <codex@openai.com>"
 - Move: `tests/test_dependencies.py`、`tests/test_toolchain.py` → `dev/tests/`
 - Move: `npabridge/package.py` 的 `publish_app_bundle` + `inspect_app_ipa` → `dev/smoke_package.py`（原样搬运，只调整 `ROOT`/`sign` 导入）
 - Create: `dev/README.md`、`tests/support.py`（若 Task 3/4 尚未创建）
-- Modify: `dev/tools/smoke.py`（改从 `dev/smoke_package.py` 导入）、`tools/verify.py`（`ACCEPTANCE` 路径改 `dev/acceptance.json`）
+- Modify: `dev/tools/smoke.py`（改从 `dev/smoke_package.py` 导入）
 
 **Interfaces:**
 - Produces: `dev/README.md` 说明源码重建、设备验收复现、发布产物流程
@@ -938,8 +874,6 @@ git mv tests/test_toolchain.py dev/tests/test_toolchain.py
 ```
 
 每个 `dev/tools/*.py` 的 `ROOT = Path(__file__).resolve().parents[1]` 改为 `parents[2]`（`dev/tools/x.py` → 仓库根）；`dev/smoke` 相关路径同步（`tools/smoke.py` 里的 `dev/smoke/BridgeSmoke/...`）。`dev/tests/*` 加一行 `sys.path.insert(0, str(Path(__file__).resolve().parents[2]))`，因 pytest 默认 `rootdir` 的 `pythonpath` 仍是仓库根。
-
-`tools/verify.py`：`ACCEPTANCE = ROOT / "dev" / "acceptance.json"`。
 
 - [ ] **Step 2: 写 dev/README.md**
 
@@ -1138,13 +1072,14 @@ Expected: `packaged main` = `19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db53
 Run: `env DEVELOPER_DIR=/nonexistent uv run npa-patch ../nPlayer_3.13.0.ipa -o build/accept/no-xcode.ipa`
 Expected: 成功；若任何环节调用 `xcrun`，该命令会失败。
 
-- [ ] **Step 4: 成品校验与 dev 报告**
+- [ ] **Step 4: dev 侧校验**
 
 Run:
 ```bash
-uv run python tools/verify.py --ipa build/accept/bridge.ipa
+uv run python -m npabridge.build_bridge --verify-only
+uv run pytest -q
 ```
-Expected: 全部具名 check 通过，报告写入 `dist/verification.json` 并带上 `dev/acceptance.json` 的设备结论。
+Expected: 7 个 bridge check 全过；测试全绿。成品本身的校验已在 `npa-patch` 内完成（不通过就不会写出文件），设备结论留在 `dev/acceptance.json` 与 README 的 Verification status 一节。
 
 - [ ] **Step 5: 写执行记录并提交**
 
@@ -1177,6 +1112,23 @@ Co-authored-by: Codex <codex@openai.com>"
 
 **Placeholder scan:** 无 TBD/TODO；每个代码步都给了可执行代码或确切命令。唯一需要用户提供的是 `LICENSE` 的版权行与 README 里的仓库地址（Task 7 Step 2 已标注）。
 
-**Type consistency:** `select_manifest` 返回 `(Manifest, Path)`（Task 4 正文说明），`verify_artifact` 去掉 `mode`，`package.publish(source, output, main, bridge)`，`PatchResult` 字段在 Task 4/5 与 Task 8 的命令输出中一致。
+**Type consistency:** `select_manifest` 返回 `Manifest`（单个，见 Task 4 正文），`verify_artifact` 去掉 `mode`，`package.publish(source, output, main, bridge)`、`package_ipa(source, output, main, bridge, work=None)`，`PatchResult` 的 9 个字段在 Task 4/5 与 Task 8 的命令输出中一致。
 
 **Review Focus 覆盖:** 五条分别由 Task 4 的 `test_encrypted_input_is_reported_as_encrypted`、`test_unsupported_version_lists_the_supported_ones`、`test_invalid_bridge_is_rejected_by_name`、两个"输出不存在"断言、`_extract_main` 的成员检查覆盖。
+
+## 消融审查（用户已确认）
+
+初稿经一轮"是否过度工程"排查，采纳以下删减（未采纳的项保持原样）：
+
+- 删除 `tools/doctor.py`：依赖缺失的提示由 Task 3 的 `_tool()` 直接给出，不维护第二份清单。
+- 删除 `tools/verify.py` 与 `dist/verification.json`：dev 侧用 `build_bridge --verify-only`，成品校验在 `npa-patch` 内完成。
+- Task 1 的元数据断言并入既有 `tests/test_bridge.py`，不新建 `tests/test_macho_metadata.py`。
+- `PatchResult` 从 12 个字段砍到 9 个（去掉 check 明细、中间件哈希、manifest 路径）。
+- 删除 `dev/tests/test_abi_probe.py` 这一无内容的幽灵条目。
+- 删除 `libass_version == deps/sources.lock.json` 的跨文件一致性测试，改由 `dev/README.md` 的发布清单负责。
+- `dev/abi_probe.py` 只留三行 `__main__`，不写 `--emit` JSON 组装。
+
+保留（用户选择维持原方案）：`tests/support.py` + `NPA_SOURCE_IPA`、把 `publish_app_bundle`/`inspect_app_ipa` 搬到 `dev/smoke_package.py`。
+
+修正的计划缺陷：坏 bridge 测试改用从源 IPA 取出的 main（`/usr/lib/libSystem.B.dylib` 是 fat 二进制，会先在 `bridge.macho` 失败）；`package_ipa` 的暂存目录改为调用方传入的 `work`（缺省 `tempfile.mkdtemp`），不再把临时文件写回仓库。
+
