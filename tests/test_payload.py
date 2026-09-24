@@ -301,19 +301,23 @@ class MultiUnitPayloadTests(unittest.TestCase):
 
     def test_every_unit_arbitrates_its_own_state(self):
         words = _code_words(self.payload.text)
-        self.assertEqual(words.count(LDAXR), 2)
-        self.assertEqual(words.count(STXR), 2)
-        self.assertEqual(words.count(STLR), 4)
-        self.assertEqual(words.count(YIELD), 2)
-        self.assertEqual(words.count(LDAR), len(self.apis) + 2)
+        units = len(self.units)
+        self.assertEqual(words.count(LDAXR), units)
+        self.assertEqual(words.count(STXR), units)
+        self.assertEqual(words.count(STLR), 2 * units)
+        self.assertEqual(words.count(YIELD), units)
+        self.assertEqual(words.count(LDAR), len(self.apis) + units)
 
     def test_each_unit_checks_only_its_own_basename(self):
         immediates = _cmp_w5_immediates(self.payload.text)
+        expected: dict[str, int] = {}
+        for unit in self.units:
+            expected[unit.basename] = expected.get(unit.basename, 0) + unit.symbol_count
         for unit in self.units:
             with self.subTest(unit=unit.id):
                 self.assertEqual(
                     _basename_occurrences(immediates, unit.basename),
-                    unit.symbol_count,
+                    expected[unit.basename],
                 )
 
     def test_every_slot_access_resolves_to_its_own_slot(self):
@@ -329,11 +333,11 @@ class MultiUnitPayloadTests(unittest.TestCase):
                             expected,
                         )
 
-    def test_data_grows_with_the_second_unit(self):
+    def test_data_grows_with_the_extra_unit(self):
         expected = sum(8 + 8 * unit.symbol_count for unit in self.units)
-        single = sum(8 + 8 * unit.symbol_count for unit in MANIFEST.units())
+        without = sum(8 + 8 * unit.symbol_count for unit in MANIFEST.units())
         self.assertEqual(len(self.payload.data), expected)
-        self.assertEqual(len(self.payload.data), single + 8 + 8 * 2)
+        self.assertEqual(len(self.payload.data), without + 8 + 8 * 2)
 
     def test_selection_drops_the_unselected_unit(self):
         only_first = self.manifest.units(("libass",))

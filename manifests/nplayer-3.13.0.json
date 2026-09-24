@@ -127,6 +127,80 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ffmpeg",
+      "library_version": "9.0.2",
+      "basename": "LibFFmpegBridge.dylib",
+      "build": {
+        "source": "bridge/npa_ffmpeg_util_bridge.c",
+        "exports": "bridge/ffmpeg-util.exports",
+        "closure": "build/deps/ffmpeg-closure.txt",
+        "include_root": "build/deps/ffmpeg/include",
+        "lib_root": "build/deps/ffmpeg/lib"
+      },
+      "domains": [
+        {
+          "id": "libswscale",
+          "apis": [
+            {
+              "symbol": "npa_sws_getContext",
+              "call_sites": ["0x100A23428", "0x100A46A90", "0x100A8A4A4"],
+              "old_target": "0x1008DDD8C"
+            },
+            {
+              "symbol": "npa_sws_getCachedContext",
+              "call_sites": ["0x100A8A450"],
+              "old_target": "0x1008DE290"
+            },
+            {
+              "symbol": "npa_sws_scale",
+              "call_sites": ["0x100A234AC", "0x100A46AB8", "0x100A8A470", "0x100A8A4C4"],
+              "old_target": "0x1008C6540"
+            },
+            {
+              "symbol": "npa_sws_freeContext",
+              "call_sites": ["0x100A2354C", "0x100A31DF4", "0x100A46B78", "0x100A8A4D0"],
+              "old_target": "0x1008DE0CC"
+            }
+          ]
+        },
+        {
+          "id": "libswresample",
+          "apis": [
+            {
+              "symbol": "npa_swr_alloc",
+              "call_sites": ["0x100ABF9DC"],
+              "old_target": "0x10112C980"
+            },
+            {
+              "symbol": "npa_swr_alloc_set_opts",
+              "call_sites": ["0x100ABFB58"],
+              "old_target": "0x1008744BC"
+            },
+            {
+              "symbol": "npa_swr_set_matrix",
+              "call_sites": ["0x100ABFC34"],
+              "old_target": "0x10086E348"
+            },
+            {
+              "symbol": "npa_swr_init",
+              "call_sites": ["0x100ABFC48"],
+              "old_target": "0x10112DC28"
+            },
+            {
+              "symbol": "npa_swr_convert",
+              "call_sites": ["0x100ABFC78"],
+              "old_target": "0x100874AA4"
+            },
+            {
+              "symbol": "npa_swr_close",
+              "call_sites": ["0x100ABFA38", "0x100ABFB34"],
+              "old_target": "0x10112DBE0"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

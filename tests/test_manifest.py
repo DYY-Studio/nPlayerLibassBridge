@@ -69,12 +69,52 @@ class ManifestTests(unittest.TestCase):
             cls.main_bytes = archive.read(MAIN_MEMBER)
 
     def test_every_unit_is_reachable_from_the_dylib(self):
-        self.assertEqual([unit.id for unit in self.units], ["libass/libass"])
+        self.assertEqual(
+            [unit.id for unit in self.units],
+            ["libass/libass", "ffmpeg/libswscale", "ffmpeg/libswresample"],
+        )
         self.assertEqual(self.unit.dylib_id, "libass")
         self.assertEqual(self.unit.domain_id, "libass")
+        for dylib in self.manifest.dylibs:
+            with self.subTest(dylib=dylib.id):
+                self.assertEqual(
+                    [domain.id for domain in dylib.domains],
+                    [
+                        unit.domain_id
+                        for unit in self.units
+                        if unit.dylib_id == dylib.id
+                    ],
+                )
+                for unit in self.units:
+                    if unit.dylib_id == dylib.id:
+                        self.assertEqual(unit.basename, dylib.basename)
+
+    def test_ffmpeg_units_split_the_legacy_scaler_and_resampler(self):
+        swscale, swresample = (
+            self.manifest.units(("ffmpeg",))[0],
+            self.manifest.units(("ffmpeg",))[1],
+        )
+        self.assertEqual((swscale.symbol_count, swscale.call_site_count), (4, 12))
+        self.assertEqual((swresample.symbol_count, swresample.call_site_count), (6, 7))
         self.assertEqual(
-            [domain.id for domain in self.libass.domains],
-            [unit.domain_id for unit in self.units],
+            {api.symbol for api in swscale.apis},
+            {
+                "npa_sws_getContext",
+                "npa_sws_getCachedContext",
+                "npa_sws_scale",
+                "npa_sws_freeContext",
+            },
+        )
+        self.assertEqual(
+            {api.symbol for api in swresample.apis},
+            {
+                "npa_swr_alloc",
+                "npa_swr_alloc_set_opts",
+                "npa_swr_set_matrix",
+                "npa_swr_init",
+                "npa_swr_convert",
+                "npa_swr_close",
+            },
         )
 
     def test_unit_ids_are_globally_unique(self):
@@ -152,6 +192,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(
             self.manifest.extra_sites(("libass",)), self.libass.extra_sites
         )
+        self.assertEqual(self.manifest.extra_sites(("ffmpeg",)), ())
         self.assertEqual(self.manifest.extra_sites(()), ())
 
     def test_callback_metadata(self):
@@ -168,6 +209,20 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(build.closure, "build/deps/libass-closure.txt")
         self.assertEqual(build.include_root, "build/deps/include")
         self.assertEqual(build.lib_root, "build/deps/lib")
+
+    def test_build_spec_points_at_the_ffmpeg_closure(self):
+        build = self.manifest.dylib("ffmpeg").build
+        self.assertEqual(build.source, "bridge/npa_ffmpeg_util_bridge.c")
+        self.assertEqual(build.exports, "bridge/ffmpeg-util.exports")
+        self.assertEqual(build.closure, "build/deps/ffmpeg-closure.txt")
+        self.assertEqual(build.include_root, "build/deps/ffmpeg/include")
+        self.assertEqual(build.lib_root, "build/deps/ffmpeg/lib")
+        self.assertEqual(self.manifest.dylib("ffmpeg").library_version, "9.0.2")
+        self.assertEqual(
+            self.manifest.dylib("ffmpeg").install_name, "@rpath/LibFFmpegBridge.dylib"
+        )
+        self.assertIsNone(self.manifest.dylib("ffmpeg").callback)
+        self.assertEqual(self.manifest.dylib("ffmpeg").extra_sites, ())
 
     def test_manifest_declares_the_frozen_abi(self):
         self.assertEqual(self.manifest.app_version, "3.13.0")

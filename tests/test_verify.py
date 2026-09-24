@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from zipfile import ZipFile
 
-from npabridge import build_bridge, macho
+from npabridge import macho
 from npabridge.manifest import encode_bl, load_manifest
 from npabridge.macho import IPA_MEMBER, parse, phase_a, phase_b
 from npabridge.payload import unit_offsets
@@ -16,7 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
 UNITS = MANIFEST.units()
 BUILD = ROOT / "build" / "macho"
-BRIDGES = {"libass": build_bridge.OUTPUT}
+BRIDGES = {
+    "libass": ROOT / "build" / "LibASSBridge.dylib",
+    "ffmpeg": ROOT / "build" / "LibFFmpegBridge.dylib",
+}
 
 
 class VerifyTests(unittest.TestCase):
@@ -24,7 +27,7 @@ class VerifyTests(unittest.TestCase):
     def setUpClass(cls):
         if not SOURCE_IPA.is_file():
             raise unittest.SkipTest("source IPA is not present")
-        if not build_bridge.OUTPUT.is_file():
+        if not BRIDGES["libass"].is_file():
             raise unittest.SkipTest("LibASSBridge.dylib is not built")
         BUILD.mkdir(parents=True, exist_ok=True)
         cls.baseline = BUILD / "verify-clean-main"
@@ -41,7 +44,10 @@ class VerifyTests(unittest.TestCase):
         )
         report.require()
         self.assertEqual(report.state_initial, 0)
-        self.assertEqual(set(report.bridge_sha256s), {"LibASSBridge.dylib"})
+        self.assertEqual(
+            set(report.bridge_sha256s),
+            {"LibASSBridge.dylib", "LibFFmpegBridge.dylib"},
+        )
         for check in report.checks:
             self.assertTrue(check.ok, check)
 
@@ -100,7 +106,7 @@ class VerifyTests(unittest.TestCase):
                 replace(full.domains[0], apis=full.domains[0].apis[:-1]),
             ),
         )
-        report = verify_bridge(build_bridge.OUTPUT, truncated)
+        report = verify_bridge(BRIDGES["libass"], truncated)
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("bridge.exports", caught.exception.codes)

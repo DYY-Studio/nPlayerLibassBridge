@@ -66,9 +66,10 @@ class MachOTests(unittest.TestCase):
 
     def test_phase_a_freezes_the_payload_segments(self):
         report = self.phase_a_report
-        self.assertEqual(report["reserved_text"], 7296)
+        self.assertEqual(report["reserved_text"], 12616)
         self.assertEqual(
-            report["dylib_ordinals"][-1][0], MANIFEST.dylib("libass").path
+            [name for name, _ in report["dylib_ordinals"][-2:]],
+            [MANIFEST.dylib("libass").path, MANIFEST.dylib("ffmpeg").path],
         )
         after = parse(self.layout)
         text = after.get_segment(SEGMENT_TEXT)
@@ -85,7 +86,7 @@ class MachOTests(unittest.TestCase):
         self.assertEqual(before.bind_targets, after.bind_targets)
         self.assertEqual(before.lazy_targets, after.lazy_targets)
         self.assertEqual(before.export_symbols, after.export_symbols)
-        self.assertEqual(before.dylib_ordinals, after.dylib_ordinals[:-1])
+        self.assertEqual(before.dylib_ordinals, after.dylib_ordinals[:-2])
         moved = {
             name
             for name, address in before.segment_vas.items()
@@ -94,7 +95,7 @@ class MachOTests(unittest.TestCase):
         self.assertEqual(moved, {"__LINKEDIT"})
 
     def test_phase_b_changes_only_the_frozen_sites(self):
-        self.assertEqual(self.phase_b_report["patched_call_sites"], 16)
+        self.assertEqual(self.phase_b_report["patched_call_sites"], 35)
         self.assertEqual(self.phase_b_report["extra_sites"], [0x100A0392C, 0x100ACBC14])
         before = parse(self.layout)
         after = parse(self.patched)
@@ -113,7 +114,7 @@ class MachOTests(unittest.TestCase):
                 )
             else:
                 self.assertEqual(old, new_sections[name], name)
-        self.assertEqual(changed, 18)
+        self.assertEqual(changed, 37)
 
     def test_phase_b_writes_the_assembled_payload(self):
         layout = parse(self.layout)

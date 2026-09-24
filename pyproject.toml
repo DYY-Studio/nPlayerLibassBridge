@@ -18,7 +18,12 @@ dev = ["meson", "ninja", "pytest"]
 [tool.hatch.build.targets.wheel]
 # the patch flow reads the manifests and the bridge source at run time, so an
 # installed console script needs them next to the package
-only-include = ["npabridge", "manifests", "bridge/npa_ass_bridge.c"]
+only-include = [
+    "npabridge",
+    "manifests",
+    "bridge/npa_ass_bridge.c",
+    "bridge/npa_ffmpeg_util_bridge.c",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
