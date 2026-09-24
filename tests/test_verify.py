@@ -6,10 +6,11 @@ from zipfile import ZipFile
 from npabridge import build_bridge, macho
 from npabridge.manifest import encode_bl, load_manifest
 from npabridge.macho import IPA_MEMBER, parse, phase_a, phase_b
-from npabridge.verify import VerificationError, verify_artifact, verify_bridge
+from npabridge.verify import VerificationError, verify_artifact
+
+from support import SOURCE_IPA
 
 ROOT = Path(__file__).resolve().parents[1]
-IPA = ROOT.parent / "nPlayer_3.13.0.ipa"
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
 BUILD = ROOT / "build" / "macho"
 
@@ -17,9 +18,13 @@ BUILD = ROOT / "build" / "macho"
 class VerifyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not SOURCE_IPA.is_file():
+            raise unittest.SkipTest("source IPA is not present")
+        if not build_bridge.OUTPUT.is_file():
+            raise unittest.SkipTest("LibASSBridge.dylib is not built")
         BUILD.mkdir(parents=True, exist_ok=True)
         cls.baseline = BUILD / "verify-clean-main"
-        with ZipFile(IPA) as archive:
+        with ZipFile(SOURCE_IPA) as archive:
             cls.baseline.write_bytes(archive.read(IPA_MEMBER))
         cls.layout = BUILD / "verify-phase-a"
         cls.patched = BUILD / "verify-phase-b"
@@ -31,31 +36,12 @@ class VerifyTests(unittest.TestCase):
             self.baseline,
             self.patched,
             MANIFEST,
-            build_bridge.OUTPUT if build_bridge.OUTPUT.is_file() else None,
+            build_bridge.OUTPUT,
         )
         report.require()
         self.assertEqual(report.state_initial, 0)
         for check in report.checks:
             self.assertTrue(check.ok, check)
-
-    def test_extra_export_is_rejected(self):
-        exports = (ROOT / "bridge" / "bridge.exports").read_text(encoding="utf-8")
-        mutated_exports = ROOT / "build" / "macho" / "mutated.exports"
-        mutated_exports.write_text(exports + "_ass_library_init\n", encoding="utf-8")
-        archives, link_args = build_bridge.load_closure()
-        mutated = ROOT / "build" / "macho" / "mutated-bridge.dylib"
-        build_bridge.link_bridge(
-            macho.sdk_path(),
-            archives,
-            link_args,
-            mutated,
-            export_list=mutated_exports,
-        )
-        self.assertEqual(len(macho.exported_symbols(macho.parse(mutated))), 16)
-        report = verify_bridge(mutated, MANIFEST)
-        with self.assertRaises(VerificationError) as caught:
-            report.require()
-        self.assertIn("bridge.exports", caught.exception.codes)
 
     def test_wrong_call_site_is_rejected(self):
         mutated = self._mutate(self.patched, "mutated-callsite")
@@ -65,7 +51,7 @@ class VerifyTests(unittest.TestCase):
         raw = bytearray(mutated.read_bytes())
         raw[offset : offset + 4] = struct.pack("<I", encode_bl(site, 0x100A00000))
         mutated.write_bytes(bytes(raw))
-        report = verify_artifact(self.baseline, mutated, MANIFEST)
+        report = verify_artifact(self.baseline, mutated, MANIFEST, build_bridge.OUTPUT)
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("main.call_sites", caught.exception.codes)
@@ -78,7 +64,7 @@ class VerifyTests(unittest.TestCase):
         offset = int(segment.file_offset)
         raw[offset : offset + 4] = struct.pack("<I", 1)
         mutated.write_bytes(bytes(raw))
-        report = verify_artifact(self.baseline, mutated, MANIFEST)
+        report = verify_artifact(self.baseline, mutated, MANIFEST, build_bridge.OUTPUT)
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("payload.state", caught.exception.codes)

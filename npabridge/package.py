@@ -1,9 +1,7 @@
-"""Package the pseudo-signed IPA variants.
+"""Assemble and pseudo-sign a patched IPA.
 
-Four variants exist: baseline (clean IPA plus the two NOP guards),
-weak-load-only (frozen layout, no dispatch redirects), fallback (full
-dispatch without the bridge) and bridge (full dispatch plus the dylib).
-Every artifact is assembled in a scratch tree, signed with ldid and only
+One artifact exists: a patched main plus the LibASSBridge dylib. Every
+artifact is assembled in a scratch tree, signed with ldid and only
 published after its contents were checked.
 """
 
@@ -13,25 +11,35 @@ import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_IPA = ROOT.parent / "nPlayer_3.13.0.ipa"
 APP_DIR = Path("Payload") / "nPlayer.app"
 MAIN_MEMBER = (APP_DIR / "nPlayer").as_posix()
 BRIDGE_MEMBER = (APP_DIR / "Frameworks" / "LibASSBridge.dylib").as_posix()
-WORK_ROOT = ROOT / "build" / "package"
-DIST = ROOT / "dist"
+WORK_ROOT = ROOT / "build" / "patch"
 LINKEDIT = "ldid"
-VARIANTS = ("baseline", "weak-load-only", "fallback", "bridge")
+TOOL_HINTS = {
+    "ldid": "brew install ldid",
+    "zip": "macOS ships /usr/bin/zip; on Linux install zip",
+    "unzip": "macOS ships /usr/bin/unzip; on Linux install unzip",
+}
 
 
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def _tool(name: str) -> str:
+    path = shutil.which(name)
+    if path is None:
+        raise RuntimeError(f"{name} is required to assemble the IPA ({TOOL_HINTS[name]})")
+    return path
 
 
 def _run(command: list[object], cwd: Path | None = None) -> None:
@@ -51,17 +59,14 @@ def _sha256(path: Path) -> str:
 
 
 def sign(path: Path) -> None:
-    tool = shutil.which(LINKEDIT)
-    if tool is None:
-        raise RuntimeError("ldid is required to pseudo-sign the artifacts")
-    _run([tool, "-S", path])
+    _run([_tool(LINKEDIT), "-S", path])
 
 
 def extract_bundle(source_ipa: Path, destination: Path) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
-    _run(["/usr/bin/unzip", "-q", source_ipa, "-d", destination])
+    _run([_tool("unzip"), "-q", source_ipa, "-d", destination])
     app = destination / APP_DIR
     _require((app / "nPlayer").is_file(), f"source IPA has no {MAIN_MEMBER}")
     return app
@@ -71,31 +76,32 @@ def package_ipa(
     source_ipa: Path,
     output: Path,
     main: Path,
-    bridge: Path | None = None,
+    bridge: Path,
+    work: Path | None = None,
 ) -> dict[str, Any]:
-    """Assemble, pseudo-sign and publish one IPA variant."""
+    """Assemble, pseudo-sign and publish one patched IPA."""
 
-    WORK_ROOT.mkdir(parents=True, exist_ok=True)
-    scratch = WORK_ROOT / f"tree-{output.name}"
+    scratch_root = Path(work) if work is not None else Path(tempfile.mkdtemp())
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    scratch = scratch_root / f"tree-{output.name}"
     app = extract_bundle(source_ipa, scratch)
     executable = app / "nPlayer"
     shutil.copy2(main, executable)
     executable.chmod(0o755)
     sign(executable)
-    if bridge is not None:
-        frameworks = app / "Frameworks"
-        frameworks.mkdir(exist_ok=True)
-        target = frameworks / "LibASSBridge.dylib"
-        shutil.copy2(bridge, target)
-        target.chmod(0o755)
-        sign(target)
+    frameworks = app / "Frameworks"
+    frameworks.mkdir(exist_ok=True)
+    target = frameworks / "LibASSBridge.dylib"
+    shutil.copy2(bridge, target)
+    target.chmod(0o755)
+    sign(target)
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".tmp-{output.name}")
     temporary.unlink(missing_ok=True)
     entries = sorted(path.name for path in scratch.iterdir())
     try:
-        _run(["/usr/bin/zip", "-q", "-r", "-y", temporary, *entries], cwd=scratch)
-        report = inspect_ipa(temporary, bridge is not None)
+        _run([_tool("zip"), "-q", "-r", "-y", temporary, *entries], cwd=scratch)
+        report = inspect_ipa(temporary)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
@@ -104,26 +110,20 @@ def package_ipa(
     report.update(
         {
             "artifact": str(output),
-            "variant": output.stem,
-            "mode": "bridge" if bridge is not None else "fallback",
             "main_sha256": _sha256(main),
-            "bridge_sha256": _sha256(bridge) if bridge is not None else "",
+            "bridge_sha256": _sha256(bridge),
         }
     )
     return report
 
 
-def inspect_ipa(path: Path, expect_bridge: bool) -> dict[str, Any]:
+def inspect_ipa(path: Path) -> dict[str, Any]:
     with ZipFile(path) as archive:
         names = archive.namelist()
     mains = [name for name in names if name == MAIN_MEMBER]
     bridges = [name for name in names if name == BRIDGE_MEMBER]
     _require(len(mains) == 1, f"{path.name} carries {len(mains)} main executables")
-    expected_bridges = 1 if expect_bridge else 0
-    _require(
-        len(bridges) == expected_bridges,
-        f"{path.name} carries {len(bridges)} bridge dylibs instead of {expected_bridges}",
-    )
+    _require(len(bridges) == 1, f"{path.name} carries {len(bridges)} bridge dylibs")
     return {"main_members": len(mains), "bridge_members": len(bridges)}
 
 
@@ -146,15 +146,11 @@ def extract_for_verification(ipa: Path, destination: Path) -> dict[str, Path]:
 
 
 def publish(
-    variant: str,
     source_ipa: Path,
     output: Path,
     main: Path,
-    bridge: Path | None,
+    bridge: Path,
 ) -> dict[str, Any]:
-    if variant not in VARIANTS:
-        raise ValueError(f"unknown variant: {variant}")
-    _require(output.stem == variant, f"output name {output.name} does not match {variant}")
     return package_ipa(source_ipa, output, main, bridge)
 
 
@@ -186,7 +182,7 @@ def publish_app_bundle(bundle: Path, output: Path) -> dict[str, Any]:
     temporary.unlink(missing_ok=True)
     entries = sorted(path.name for path in scratch.iterdir())
     try:
-        _run(["/usr/bin/zip", "-q", "-r", "-y", temporary, *entries], cwd=scratch)
+        _run([_tool("zip"), "-q", "-r", "-y", temporary, *entries], cwd=scratch)
         report = inspect_app_ipa(temporary, bundle.name, binary.name)
     except Exception:
         temporary.unlink(missing_ok=True)

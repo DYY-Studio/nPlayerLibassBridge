@@ -5,6 +5,7 @@ from zipfile import ZipFile
 from npabridge import package
 from npabridge.macho import parse
 
+from support import SOURCE_IPA
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "package"
@@ -15,13 +16,15 @@ BRIDGE = ROOT / "build" / "LibASSBridge.dylib"
 class PackageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not SOURCE_IPA.is_file():
+            raise unittest.SkipTest("source IPA is not present")
         if not MAIN.is_file() or not BRIDGE.is_file():
             raise unittest.SkipTest("patch artifacts are not built")
-        cls.artifact = BUILD / "test" / "bridge.ipa"
-        package.publish("bridge", package.SOURCE_IPA, cls.artifact, MAIN, BRIDGE)
+        cls.artifact = BUILD / "test" / "patched.ipa"
+        package.publish(SOURCE_IPA, cls.artifact, MAIN, BRIDGE)
 
-    def test_bridge_variant_carries_one_main_and_one_bridge(self):
-        report = package.inspect_ipa(self.artifact, expect_bridge=True)
+    def test_artifact_carries_one_main_and_one_bridge(self):
+        report = package.inspect_ipa(self.artifact)
         self.assertEqual(report, {"main_members": 1, "bridge_members": 1})
         with ZipFile(self.artifact) as archive:
             names = archive.namelist()
@@ -36,10 +39,6 @@ class PackageTests(unittest.TestCase):
             with self.subTest(artifact=name):
                 self.assertTrue(parsed.has_code_signature)
                 self.assertEqual(parsed.build_version.minos[:2], [13, 0])
-
-    def test_main_only_expectation_is_rejected(self):
-        with self.assertRaises(ValueError):
-            package.inspect_ipa(self.artifact, expect_bridge=False)
 
 
 if __name__ == "__main__":
