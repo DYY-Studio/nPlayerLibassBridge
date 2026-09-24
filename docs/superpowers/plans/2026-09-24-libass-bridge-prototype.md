@@ -1169,7 +1169,13 @@ Install `dist/smoke.ipa` and read the on-screen log. Expected: every line `PASS`
 
 - [ ] **Step 6: Publish the verification report**
 
-`dist/verification.json` already records the artifact hashes and checks. Append the device facts — device model/iOS, install path (sideload or LiveContainer), state result, callback result, font cases, smoke result and teardown result.
+`dist/verification.json` records the artifact hashes and checks; the device facts travel as options so the report stays reproducible:
+
+```bash
+uv run python tools/verify.py --all --report dist/verification.json \
+  --device-model "<model>" --device-os "<ios>" --device-install "<sideload|LiveContainer>" \
+  --note "<variant>: <observation>"   # repeatable
+```
 
 - [ ] **Step 7: Commit checkpoint if authorized**
 
@@ -1199,7 +1205,17 @@ test: complete libass bridge prototype verification
 - 打包：四个变体走 `npabridge/package.py` + `tools/package.py`，ldid 伪签名后原子发布；`dist/smoke.ipa` 走 `publish_app_bundle`。非越狱侧载/LiveContainer 会由侧载工具重新签名整个 bundle，我们的 `ldid -S` 只保证自签名可加载。
 - 产物布局：`build/input/nPlayer`（clean main）、`build/macho/main-baseline|phase-a|phase-b`、`build/LibASSBridge.dylib`、`build/deps/*`、`dist/*.ipa`、`dist/verification.json`。
 
-**尚未执行**：Task 11 的 Step 2–6 是设备验收，需要在真机上安装 `dist/*.ipa` 并记录结果；`dist/verification.json` 目前只包含构建期检查与产物哈希。
+Task 11 设备验收（已完成）：iPhone SE (3rd Gen) / iOS 17.7.2 / LiveContainer 3.7.2 Stable。
+
+- `smoke.ipa`：`SMOKE: PASS`，`ASS_Image` 链表非空，app 兼容析构顺序干净。
+  - smoke 应用自身曾有两个 bug（与 bridge 无关），已修：`ass_flush_events()` 会释放全部事件，原实现写在写入 Dialogue 之后，导致轨道为空、渲染无输出；`ass_set_fonts_dir()` 只是内嵌字体目录（`ass_fontselect.c:1026`），原实现传 `/System/Library/Fonts`，libass 不递归、读子目录失败，打出 `Read failed, 21: Is a directory` 且不提供任何系统字体。现改为先 flush 空轨道，并用 CoreText 取真实系统字体文件，同时作为 `<dir>` 与 `ass_set_fonts` 的 default font。
+- `bridge.ipa`：state NEW，真实字幕全部正常 —— SRT、内嵌 ASS、Matroska 内嵌字体、字体缓存（即 `0x100A0392C` 字体重扫 NOP 的预期行为）、连续播放（`0x100ACBC14` 字幕轨更新路径）。
+- `fallback.ipa`：OLD 路径无回归，两处 NOP 行为保留。
+- `weak-load-only.ipa`：正常启动，行为与 baseline 一致，零重定向。
+
+结论：15-API ABI 域在设备上原子切换到 libass 0.17.5 成立；`fallback` 与 `weak-load-only` 作为回退路径同样可用。
+
+产物与哈希见 `dist/verification.json`（含 device 段）；五个 IPA 的 sha256 见提交后的 `dist/`。
 
 
 ---

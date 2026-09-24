@@ -37,6 +37,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bridge", type=Path, default=DEFAULT_BRIDGE)
     parser.add_argument("--mode", choices=MODES, default=None)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--device-model", default="")
+    parser.add_argument("--device-os", default="")
+    parser.add_argument("--device-install", default="")
+    parser.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="device acceptance observation, repeatable",
+    )
     arguments = parser.parse_args(argv)
     try:
         manifest = load_manifest(ROOT / "manifests" / "nplayer-3.13.0.json")
@@ -73,12 +82,27 @@ def main(argv: list[str] | None = None) -> int:
                 as_dict = report.as_dict()
                 as_dict["artifact"] = str(ipa)
                 reports.append(as_dict)
+            document: dict[str, object] = {"artifacts": reports}
+            device = {
+                "model": arguments.device_model,
+                "os": arguments.device_os,
+                "install": arguments.device_install,
+                "notes": arguments.note,
+            }
+            if any(device.values()):
+                document["device"] = device
             arguments.report.parent.mkdir(parents=True, exist_ok=True)
             arguments.report.write_text(
-                json.dumps({"artifacts": reports}, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
+                json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
-            print(json.dumps({"artifacts": [item["mode"] for item in reports]}))
+            print(
+                json.dumps(
+                    {
+                        "artifacts": [item["mode"] for item in reports],
+                        "device": device if any(device.values()) else None,
+                    }
+                )
+            )
             for item in reports:
                 failed = [check["code"] for check in item["checks"] if not check["ok"]]
                 if failed:
