@@ -1,4 +1,9 @@
+import os
+import shutil
+import tempfile
 import unittest
+import warnings
+from unittest import mock
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -22,6 +27,29 @@ class PackageTests(unittest.TestCase):
             raise unittest.SkipTest("patch artifacts are not built")
         cls.artifact = BUILD / "test" / "patched.ipa"
         package.publish(SOURCE_IPA, cls.artifact, MAIN, BRIDGE)
+
+    def test_frameworks_path_that_is_a_file_is_rejected(self):
+        crafted = BUILD / "test" / "frameworks-file.ipa"
+        crafted.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SOURCE_IPA, crafted)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with ZipFile(crafted, "a") as archive:
+                archive.writestr(f"{package.APP_DIR}/Frameworks", b"")
+        output = BUILD / "test" / "frameworks-file-out.ipa"
+        output.unlink(missing_ok=True)
+        with self.assertRaises(ValueError) as caught:
+            package.publish(crafted, output, MAIN, BRIDGE)
+        self.assertIn("Frameworks", str(caught.exception))
+        self.assertFalse(output.exists())
+
+    def test_default_scratch_directory_is_cleaned_up(self):
+        with tempfile.TemporaryDirectory() as isolated:
+            with mock.patch.object(tempfile, "tempdir", isolated):
+                output = BUILD / "test" / "scratch.ipa"
+                package.publish(SOURCE_IPA, output, MAIN, BRIDGE)
+                self.assertEqual(os.listdir(isolated), [])
+                self.assertTrue(output.is_file())
 
     def test_artifact_carries_one_main_and_one_bridge(self):
         report = package.inspect_ipa(self.artifact)

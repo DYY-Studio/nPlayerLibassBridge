@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = Path("Payload") / "nPlayer.app"
 MAIN_MEMBER = (APP_DIR / "nPlayer").as_posix()
 BRIDGE_MEMBER = (APP_DIR / "Frameworks" / "LibASSBridge.dylib").as_posix()
-WORK_ROOT = ROOT / "build" / "patch"
 LINKEDIT = "ldid"
 TOOL_HINTS = {
     "ldid": "brew install ldid",
@@ -81,32 +80,41 @@ def package_ipa(
 ) -> dict[str, Any]:
     """Assemble, pseudo-sign and publish one patched IPA."""
 
-    scratch_root = Path(work) if work is not None else Path(tempfile.mkdtemp())
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    scratch = scratch_root / f"tree-{output.name}"
-    app = extract_bundle(source_ipa, scratch)
-    executable = app / "nPlayer"
-    shutil.copy2(main, executable)
-    executable.chmod(0o755)
-    sign(executable)
-    frameworks = app / "Frameworks"
-    frameworks.mkdir(exist_ok=True)
-    target = frameworks / "LibASSBridge.dylib"
-    shutil.copy2(bridge, target)
-    target.chmod(0o755)
-    sign(target)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".tmp-{output.name}")
-    temporary.unlink(missing_ok=True)
-    entries = sorted(path.name for path in scratch.iterdir())
+    created_scratch = work is None
+    scratch_root = Path(work) if work is not None else Path(tempfile.mkdtemp(prefix="npa-patch-"))
     try:
-        _run([_tool("zip"), "-q", "-r", "-y", temporary, *entries], cwd=scratch)
-        report = inspect_ipa(temporary)
-    except Exception:
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        scratch = scratch_root / f"tree-{output.name}"
+        app = extract_bundle(source_ipa, scratch)
+        executable = app / "nPlayer"
+        shutil.copy2(main, executable)
+        executable.chmod(0o755)
+        sign(executable)
+        frameworks = app / "Frameworks"
+        if frameworks.exists() and not frameworks.is_dir():
+            raise ValueError(
+                f"source IPA carries {frameworks.name} as a file, not a directory"
+            )
+        frameworks.mkdir(exist_ok=True)
+        target = frameworks / "LibASSBridge.dylib"
+        shutil.copy2(bridge, target)
+        target.chmod(0o755)
+        sign(target)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output.with_name(f".tmp-{output.name}")
         temporary.unlink(missing_ok=True)
-        raise
-    os.replace(temporary, output)
-    shutil.rmtree(scratch)
+        entries = sorted(path.name for path in scratch.iterdir())
+        try:
+            _run([_tool("zip"), "-q", "-r", "-y", temporary, *entries], cwd=scratch)
+            report = inspect_ipa(temporary)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        os.replace(temporary, output)
+        shutil.rmtree(scratch)
+    finally:
+        if created_scratch:
+            shutil.rmtree(scratch_root, ignore_errors=True)
     report.update(
         {
             "artifact": str(output),

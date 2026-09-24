@@ -58,6 +58,17 @@ class PatchFlowTests(unittest.TestCase):
         self.assertEqual(result.packaged_main_sha256, PACKAGED_MAIN_SHA256)
         self.assertTrue(output.is_file())
 
+    def test_refuses_to_overwrite_the_bridge_dylib(self):
+        dylib = self.work / "LibASSBridge.dylib"
+        shutil.copy2(BRIDGE, dylib)
+        before = hashlib.sha256(dylib.read_bytes()).hexdigest()
+        with self.assertRaises(ValueError) as caught:
+            patch.patch_ipa(
+                SOURCE_IPA, dylib, dylib, MANIFESTS, work=self.work / "overwrite"
+            )
+        self.assertIn("bridge", str(caught.exception).lower())
+        self.assertEqual(hashlib.sha256(dylib.read_bytes()).hexdigest(), before)
+
     def test_unsupported_version_lists_the_supported_one(self):
         unknown = self.work / "unknown-main"
         unknown.write_bytes(b"\x00" * 16)

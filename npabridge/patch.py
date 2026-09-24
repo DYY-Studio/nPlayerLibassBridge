@@ -72,7 +72,11 @@ def _extract_main(source: Path, destination: Path) -> Path:
 
 def _reject_encrypted(main: Path) -> None:
     binary = macho.parse(main)
-    if not binary.has_encryption_info or int(binary.encryption_info.crypt_id) != 0:
+    if not binary.has_encryption_info:
+        raise ValueError(
+            "input executable carries no LC_ENCRYPTION_INFO; it is not an iOS app binary"
+        )
+    if int(binary.encryption_info.crypt_id) != 0:
         raise ValueError(
             "this IPA is still FairPlay-encrypted; a decrypted dump of your own "
             "copy is required (crypt_id != 0)"
@@ -112,6 +116,8 @@ def patch_ipa(
         )
         if output_path == source:
             raise ValueError("refusing to overwrite the source IPA; pass -o")
+        if output_path == bridge:
+            raise ValueError("refusing to overwrite the bridge dylib; pass another -o")
 
         contract = verify.verify_bridge(bridge, manifest)
         contract.require()

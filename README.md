@@ -24,17 +24,23 @@ are distributed. No nPlayer IPA is included.
 ## Requirements
 
 - macOS or Linux, Python ≥ 3.11, [uv](https://docs.astral.sh/uv/), `ldid`
-  (`brew install ldid`), `zip` and `unzip`.
+  (`brew install ldid`; on Linux use your distribution's ldid build), `zip` and
+  `unzip`.
 - Your own **decrypted** nPlayer 3.13.0 IPA. App Store packages are
   FairPlay-encrypted and are rejected on purpose; this project ships no IPA and
   no decryption.
-- No Xcode, no iOS SDK, no jailbreak.
+- Two host files from the release assets: `LibASSBridge.dylib` (libass 0.17.5
+  for iOS arm64) and `libkeystone.dylib` (the arm64 assembler used to encode the
+  dispatch payload). Both are host-side build products; `make bootstrap` builds
+  the assembler locally if you prefer that.
+- No Xcode, no iOS SDK, no jailbreak. `npa-patch` runs from the repository
+  checkout, next to `manifests/`.
 
 ## Quick start
 
 ```sh
 git clone <this repository> && cd nplayer-libass-bridge
-# put LibASSBridge.dylib from the release assets next to this README
+# put LibASSBridge.dylib and libkeystone.dylib from the release assets here
 uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
@@ -75,6 +81,7 @@ Rendering differs pixel-wise from libass 0.13, which is expected.
 | `no manifest matches this main executable` | wrong nPlayer version, or the IPA already has the patch | use a supported, clean dump |
 | `bridge.exports` / `bridge.install_name` failed | wrong or stale dylib | use the `LibASSBridge.dylib` from the matching release |
 | `ldid is required to assemble the IPA` | ldid is not installed | `brew install ldid` |
+| `host assembler library is missing` | `libkeystone.dylib` is not in the checkout | download it from the release assets, or run `make bootstrap` |
 
 ## Rebuilding from source
 
