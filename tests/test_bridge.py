@@ -8,7 +8,9 @@ from npabridge.manifest import load_manifest
 
 
 MANIFEST = load_manifest(Path(__file__).resolve().parents[1] / "manifests/nplayer-3.13.0.json")
-EXPECTED_BRIDGE_SYMBOLS = tuple(api.symbol for api in MANIFEST.apis)
+EXPECTED_BRIDGE_SYMBOLS = tuple(
+    api.symbol for unit in MANIFEST.units() for api in unit.apis
+)
 
 
 class BridgeTests(unittest.TestCase):

@@ -12,11 +12,16 @@ import json
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from . import macho
-from .manifest import Manifest, encode_bl
-from .payload import Payload, PayloadLayout, assemble_payload
+from .manifest import Manifest, Unit, encode_bl
+from .payload import (
+    Payload,
+    PayloadLayout,
+    assemble_payload,
+    unit_offsets,
+)
 from .target_abi import TargetABI
 
 
@@ -133,7 +138,9 @@ def _bridge_target(binary: Any) -> str:
 
 def _bridge_exports(binary: Any, manifest: Manifest) -> str:
     exports = macho.exported_symbols(binary)
-    expected = sorted(api.macho_name for api in manifest.apis)
+    expected = sorted(
+        api.macho_name for unit in manifest.units() for api in unit.apis
+    )
     _require(exports == expected, f"exports differ: {exports}")
     return f"{len(exports)} underscore-prefixed exports"
 
@@ -212,8 +219,6 @@ def payload_layout(binary: Any) -> PayloadLayout:
     return PayloadLayout(
         text_vmaddr=int(text.virtual_address),
         data_vmaddr=int(data.virtual_address),
-        state_rva=0,
-        slots_rva=8,
     )
 
 
@@ -249,33 +254,47 @@ def _payload_relocations(binary: Any) -> str:
     return "no bind target in the payload segments"
 
 
-def _payload_state(binary: Any) -> str:
+def _payload_state(binary: Any, units: Sequence[Unit]) -> str:
     data = bytes(binary.get_segment(macho.SEGMENT_DATA).content)
-    state = struct.unpack_from("<I", data, 0)[0]
-    padding = struct.unpack_from("<I", data, 4)[0]
-    _require(state == 0, f"state word is {state}")
-    _require(padding == 0, "state padding is not zero")
-    return "state=0"
+    for unit, base in unit_offsets(units):
+        state, padding = struct.unpack_from("<II", data, base)
+        _require(state == 0, f"unit {unit.id} state word is {state}")
+        _require(padding == 0, f"unit {unit.id} state padding is not zero")
+    return f"{len(units)} states at zero"
 
 
-def _payload_slots(binary: Any) -> str:
+def _payload_slots(binary: Any, units: Sequence[Unit]) -> str:
     data = bytes(binary.get_segment(macho.SEGMENT_DATA).content)
-    slots = data[8:128]
-    _require(len(slots) == 120, "slot table is not 120 bytes")
-    _require(slots == b"\x00" * 120, "slot table is not fifteen null slots")
-    return "15 null slots"
+    for unit, base in unit_offsets(units):
+        start = base + 8
+        slots = data[start : start + 8 * unit.symbol_count]
+        _require(
+            len(slots) == 8 * unit.symbol_count,
+            f"unit {unit.id} slot table is truncated",
+        )
+        _require(
+            slots == b"\x00" * len(slots),
+            f"unit {unit.id} slot table is not all null",
+        )
+    return f"{sum(unit.symbol_count for unit in units)} null slots"
 
 
-def _payload_checks(checks: _Checks, binary: Any, manifest: Manifest, abi: TargetABI) -> Payload | None:
+def _payload_checks(
+    checks: _Checks,
+    binary: Any,
+    manifest: Manifest,
+    abi: TargetABI,
+    units: Sequence[Unit],
+) -> Payload | None:
     try:
-        payload = assemble_payload(payload_layout(binary), manifest, abi)
+        payload = assemble_payload(payload_layout(binary), manifest, abi, units)
     except Exception as error:  # noqa: BLE001
         checks.fail("main.payload", str(error))
         return None
     checks.run("payload.text", lambda: _payload_text(binary, payload))
     checks.run("payload.data", lambda: _payload_data(binary, payload))
-    checks.run("payload.state", lambda: _payload_state(binary))
-    checks.run("payload.slots", lambda: _payload_slots(binary))
+    checks.run("payload.state", lambda: _payload_state(binary, units))
+    checks.run("payload.slots", lambda: _payload_slots(binary, units))
     checks.run("payload.relocations", lambda: _payload_relocations(binary))
     return payload
 
@@ -283,13 +302,14 @@ def _payload_checks(checks: _Checks, binary: Any, manifest: Manifest, abi: Targe
 def verify_payload(
     binary: Any,
     manifest: Manifest,
+    units: Sequence[Unit],
     target_abi: TargetABI | None = None,
 ) -> VerificationReport:
-    """Verify the payload text, state word and slot table of one main."""
+    """Verify the payload text, state words and slot tables of one main."""
 
     abi = target_abi or manifest.target_abi
     checks = _Checks()
-    _payload_checks(checks, binary, manifest, abi)
+    _payload_checks(checks, binary, manifest, abi, units)
     return VerificationReport(str(macho.SEGMENT_TEXT), "payload", tuple(checks.checks))
 
 
@@ -297,6 +317,7 @@ def verify_main(
     baseline: Path,
     patched: Path,
     manifest: Manifest,
+    units: Sequence[Unit],
     target_abi: TargetABI | None = None,
 ) -> VerificationReport:
     """Verify a patched main against the frozen clean baseline."""
@@ -316,18 +337,22 @@ def verify_main(
     checks.run("main.bindings", lambda: _bindings(before, after))
     checks.run("main.segments", lambda: _segments(before, after))
     checks.run("main.sections", lambda: _sections(before, after, strict_text=False))
-    checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest))
+    checks.run("main.dylib_ordinals", lambda: _dylib_ordinals(before, after, manifest, units))
     checks.run(
         "main.instructions",
         lambda: _changed_sites(
             before,
             after,
-            {site for api in manifest.apis for site in api.call_sites} | set(macho.NOP_SITES),
+            {site for unit in units for api in unit.apis for site in api.call_sites}
+            | set(macho.NOP_SITES),
         ),
     )
-    checks.run("main.call_sites", lambda: _changed_and_patched(patched, after, manifest, abi))
+    checks.run(
+        "main.call_sites",
+        lambda: _changed_and_patched(patched, after, manifest, abi, units),
+    )
     checks.run("main.nops", lambda: _nops(patched))
-    _payload_checks(checks, after, manifest, abi)
+    _payload_checks(checks, after, manifest, abi, units)
     state = struct.unpack_from(
         "<I", bytes(after.get_segment(macho.SEGMENT_DATA).content), 0
     )[0]
@@ -405,11 +430,21 @@ def _changed_sites(before: Any, after: Any, expected: set[int]) -> str:
     return f"{len(changed)} instruction sites changed"
 
 
-def _dylib_ordinals(before: Any, after: Any, manifest: Manifest) -> str:
+def _dylib_ordinals(
+    before: Any, after: Any, manifest: Manifest, units: Sequence[Unit]
+) -> str:
     old = macho.snapshot(before).dylib_ordinals
     new = macho.snapshot(after).dylib_ordinals
-    _require(new[:-1] == old, "existing dylib ordinals changed")
-    _require(new[-1][0] == manifest.bridge_path, "bridge is not the final dependency")
+    expected = [
+        manifest.dylib(dylib_id).path
+        for dylib_id in dict.fromkeys(unit.dylib_id for unit in units)
+    ]
+    _require(len(new) == len(old) + len(expected), "unexpected dylib command count")
+    _require(new[: len(old)] == old, "existing dylib ordinals changed")
+    _require(
+        [name for name, _ in new[len(old) :]] == expected,
+        "the weak bridge dependencies are not the selected dylibs",
+    )
     return f"{len(new)} dylib commands"
 
 
@@ -423,21 +458,26 @@ def _bindings(before: Any, after: Any) -> str:
 
 
 def _changed_and_patched(
-    patched: Path, binary: Any, manifest: Manifest, abi: TargetABI
+    patched: Path,
+    binary: Any,
+    manifest: Manifest,
+    abi: TargetABI,
+    units: Sequence[Unit],
 ) -> str:
-    payload = assemble_payload(payload_layout(binary), manifest, abi)
+    payload = assemble_payload(payload_layout(binary), manifest, abi, units)
     raw = patched.read_bytes()
     count = 0
-    for api in manifest.apis:
-        for site in api.call_sites:
-            offset = int(binary.virtual_address_to_offset(site))
-            veneer = payload.symbols[f"veneer_{api.symbol}"]
-            expected = struct.pack("<I", encode_bl(site, veneer))
-            _require(
-                raw[offset : offset + 4] == expected,
-                f"call site {site:#x} is not redirected",
-            )
-            count += 1
+    for unit in units:
+        for api in unit.apis:
+            for site in api.call_sites:
+                offset = int(binary.virtual_address_to_offset(site))
+                veneer = payload.symbols[f"veneer_{api.symbol}"]
+                expected = struct.pack("<I", encode_bl(site, veneer))
+                _require(
+                    raw[offset : offset + 4] == expected,
+                    f"call site {site:#x} is not redirected",
+                )
+                count += 1
     return f"{count} redirects"
 
 
@@ -457,13 +497,14 @@ def verify_artifact(
     baseline: Path,
     patched: Path,
     manifest: Manifest,
+    units: Sequence[Unit],
     bridge: Path,
     target_abi: TargetABI | None = None,
 ) -> VerificationReport:
     """Verify one packaged main plus its bridge dylib."""
 
     abi = target_abi or manifest.target_abi
-    main = verify_main(baseline, patched, manifest, abi)
+    main = verify_main(baseline, patched, manifest, units, abi)
     bridge_report = verify_bridge(bridge, manifest)
     return VerificationReport(
         artifact=main.artifact,

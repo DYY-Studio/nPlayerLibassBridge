@@ -14,13 +14,13 @@ import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from zipfile import ZipFile
 
 import lief
 
-from .manifest import Manifest, encode_bl
-from .payload import PayloadLayout, assemble_payload, measure_payload
+from .manifest import Manifest, Unit, encode_bl
+from .payload import PayloadLayout, assemble_payload, data_size, measure_payload
 from .target_abi import TargetABI
 
 
@@ -31,7 +31,6 @@ LINKEDIT = "__LINKEDIT"
 PAGE = 0x4000
 PROTECTION_RX = 5
 PROTECTION_RW = 3
-DATA_BLOB_SIZE = 128
 IPA_MEMBER = "Payload/nPlayer.app/nPlayer"
 NOP_WORD = 0xD503201F
 NOP_SITES = {0x100A0392C: 0x35000148, 0x100ACBC14: 0x37000080}
@@ -208,15 +207,15 @@ def provisional_layout(binary: Any) -> PayloadLayout:
     last = body[-1]
     text_vmaddr = (int(last.virtual_address) + int(last.virtual_size) + PAGE - 1) & ~(PAGE - 1)
     data_vmaddr = text_vmaddr + PAGE
-    return PayloadLayout(
-        text_vmaddr=text_vmaddr,
-        data_vmaddr=data_vmaddr,
-        state_rva=0,
-        slots_rva=8,
-    )
+    return PayloadLayout(text_vmaddr=text_vmaddr, data_vmaddr=data_vmaddr)
 
 
-def preflight(input_path: Path, manifest: Manifest, digest: str | None = None) -> None:
+def preflight(
+    input_path: Path,
+    manifest: Manifest,
+    units: Sequence[Unit],
+    digest: str | None = None,
+) -> None:
     """Reject anything that is not the frozen clean main."""
 
     data = input_path.read_bytes()
@@ -234,7 +233,7 @@ def preflight(input_path: Path, manifest: Manifest, digest: str | None = None) -
         if binary.has_segment(name):
             raise ValueError(f"input already carries {name}")
     for library in binary.libraries:
-        if str(library.name) == manifest.bridge_path:
+        if str(library.name) in {manifest.dylib(unit.dylib_id).path for unit in units}:
             raise ValueError("input already loads the bridge")
     if int(binary.available_command_space) < 128:
         raise ValueError("no load-command space for the weak dependency")
@@ -245,15 +244,16 @@ def preflight(input_path: Path, manifest: Manifest, digest: str | None = None) -
         content = bytes(binary.get_content_from_virtual_address(stub, len(thunk)))
         if content != thunk:
             raise ValueError(f"dynamic stub at {stub:#x} is not the frozen thunk")
-    for api in manifest.apis:
-        for site in api.call_sites:
-            expected = encode_bl(site, api.old_target)
-            actual = _word(binary, site)
-            if actual != expected:
-                raise ValueError(
-                    f"call site {site:#x} does not call {api.old_target:#x}: "
-                    f"{actual:#010x} != {expected:#010x}"
-                )
+    for unit in units:
+        for api in unit.apis:
+            for site in api.call_sites:
+                expected = encode_bl(site, api.old_target)
+                actual = _word(binary, site)
+                if actual != expected:
+                    raise ValueError(
+                        f"call site {site:#x} does not call {api.old_target:#x}: "
+                        f"{actual:#010x} != {expected:#010x}"
+                    )
 
 
 def _segment(name: str, vmaddr: int, offset: int, content: bytes, protection: int) -> Any:
@@ -270,16 +270,17 @@ def phase_a(
     input_path: Path,
     output_path: Path,
     manifest: Manifest,
+    units: Sequence[Unit],
     reserved_text: int | None = None,
     target_abi: TargetABI | None = None,
 ) -> dict[str, Any]:
     """Rebuild the load commands and freeze the payload segment layout."""
 
     abi = target_abi or manifest.target_abi
-    preflight(input_path, manifest)
+    preflight(input_path, manifest, units)
     binary = parse(input_path)
     provisional = provisional_layout(binary)
-    measured = measure_payload(provisional, manifest, abi)
+    measured = measure_payload(provisional, manifest, abi, units)
     if reserved_text is not None and reserved_text != measured:
         raise ValueError(
             f"reserved payload size {reserved_text} does not match measured {measured}"
@@ -287,7 +288,8 @@ def phase_a(
     reserved_text = measured
     if binary.has_code_signature:
         binary.remove_signature()
-    binary.add(lief.MachO.DylibCommand.weak_lib(manifest.bridge_path))
+    for dylib_id in dict.fromkeys(unit.dylib_id for unit in units):
+        binary.add(lief.MachO.DylibCommand.weak_lib(manifest.dylib(dylib_id).path))
     text_offset = _round_up(
         int(binary.segments[-1].file_offset) + int(binary.segments[-1].file_size), PAGE
     )
@@ -305,7 +307,7 @@ def phase_a(
             SEGMENT_DATA,
             provisional.data_vmaddr,
             text_offset + _round_up(reserved_text, PAGE),
-            b"\x00" * DATA_BLOB_SIZE,
+            b"\x00" * data_size(units),
             PROTECTION_RW,
         )
     )
@@ -319,11 +321,9 @@ def phase_a(
     layout = PayloadLayout(
         text_vmaddr=int(text.virtual_address),
         data_vmaddr=int(data.virtual_address),
-        state_rva=0,
-        slots_rva=8,
     )
     _require(
-        measure_payload(layout, manifest, abi) == reserved_text,
+        measure_payload(layout, manifest, abi, units) == reserved_text,
         "payload size depends on the final addresses",
     )
     state = snapshot(after)
@@ -355,6 +355,7 @@ def phase_b(
     layout_path: Path,
     output_path: Path,
     manifest: Manifest,
+    units: Sequence[Unit],
     target_abi: TargetABI | None = None,
 ) -> dict[str, Any]:
     """Write the payload and the branch patches into the frozen layout."""
@@ -368,10 +369,8 @@ def phase_b(
     layout = PayloadLayout(
         text_vmaddr=int(text.virtual_address),
         data_vmaddr=int(data.virtual_address),
-        state_rva=0,
-        slots_rva=8,
     )
-    payload = assemble_payload(layout, manifest, abi)
+    payload = assemble_payload(layout, manifest, abi, units)
     if len(payload.text) > int(text.file_size):
         raise ValueError(
             f"assembled payload is {len(payload.text)} bytes, "
@@ -389,16 +388,17 @@ def phase_b(
     ]
     write_equal_length(buffer, int(text.file_offset), payload.text)
     write_equal_length(buffer, int(data.file_offset), payload.data)
-    for api in manifest.apis:
-        for site in api.call_sites:
-            offset = int(binary.virtual_address_to_offset(site))
-            original = encode_bl(site, api.old_target)
-            actual = struct.unpack_from("<I", buffer, offset)[0]
-            if actual != original:
-                raise ValueError(f"call site {site:#x} is no longer the frozen BL")
-            target = payload.symbols[f"veneer_{api.symbol}"]
-            write_equal_length(buffer, offset, patch_bl(site, target))
-            writes.append((offset, 4))
+    for unit in units:
+        for api in unit.apis:
+            for site in api.call_sites:
+                offset = int(binary.virtual_address_to_offset(site))
+                original = encode_bl(site, api.old_target)
+                actual = struct.unpack_from("<I", buffer, offset)[0]
+                if actual != original:
+                    raise ValueError(f"call site {site:#x} is no longer the frozen BL")
+                target = payload.symbols[f"veneer_{api.symbol}"]
+                write_equal_length(buffer, offset, patch_bl(site, target))
+                writes.append((offset, 4))
     for site, expected in NOP_SITES.items():
         offset = int(binary.virtual_address_to_offset(site))
         if struct.unpack_from("<I", buffer, offset)[0] != expected:
@@ -413,7 +413,7 @@ def phase_b(
     return {
         "layout": str(layout_path),
         "output": str(output_path),
-        "patched_call_sites": sum(len(api.call_sites) for api in manifest.apis),
+        "patched_call_sites": sum(unit.call_site_count for unit in units),
         "nop_sites": sorted(NOP_SITES),
         "text_vmaddr": layout.text_vmaddr,
         "data_vmaddr": layout.data_vmaddr,

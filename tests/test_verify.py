@@ -12,6 +12,7 @@ from support import SOURCE_IPA
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
+UNITS = MANIFEST.units()
 BUILD = ROOT / "build" / "macho"
 
 
@@ -28,14 +29,15 @@ class VerifyTests(unittest.TestCase):
             cls.baseline.write_bytes(archive.read(IPA_MEMBER))
         cls.layout = BUILD / "verify-phase-a"
         cls.patched = BUILD / "verify-phase-b"
-        phase_a(cls.baseline, cls.layout, MANIFEST)
-        phase_b(cls.layout, cls.patched, MANIFEST)
+        phase_a(cls.baseline, cls.layout, MANIFEST, UNITS)
+        phase_b(cls.layout, cls.patched, MANIFEST, UNITS)
 
     def test_valid_artifact_passes_every_check(self):
         report = verify_artifact(
             self.baseline,
             self.patched,
             MANIFEST,
+            UNITS,
             build_bridge.OUTPUT,
         )
         report.require()
@@ -51,7 +53,7 @@ class VerifyTests(unittest.TestCase):
         raw = bytearray(mutated.read_bytes())
         raw[offset : offset + 4] = struct.pack("<I", encode_bl(site, 0x100A00000))
         mutated.write_bytes(bytes(raw))
-        report = verify_artifact(self.baseline, mutated, MANIFEST, build_bridge.OUTPUT)
+        report = verify_artifact(self.baseline, mutated, MANIFEST, UNITS, build_bridge.OUTPUT)
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("main.call_sites", caught.exception.codes)
@@ -64,7 +66,7 @@ class VerifyTests(unittest.TestCase):
         offset = int(segment.file_offset)
         raw[offset : offset + 4] = struct.pack("<I", 1)
         mutated.write_bytes(bytes(raw))
-        report = verify_artifact(self.baseline, mutated, MANIFEST, build_bridge.OUTPUT)
+        report = verify_artifact(self.baseline, mutated, MANIFEST, UNITS, build_bridge.OUTPUT)
         with self.assertRaises(VerificationError) as caught:
             report.require()
         self.assertIn("payload.state", caught.exception.codes)

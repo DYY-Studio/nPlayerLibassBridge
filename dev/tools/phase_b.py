@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         manifest = load_manifest(ROOT / "manifests" / "nplayer-3.13.0.json")
-        report = phase_b(arguments.layout, arguments.output, manifest)
+        report = phase_b(arguments.layout, arguments.output, manifest, manifest.units())
         print(json.dumps(report, indent=2, sort_keys=True))
     except Exception as error:
         print(f"phase B failed: {error}", file=sys.stderr)

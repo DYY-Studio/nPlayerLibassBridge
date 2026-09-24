@@ -3,7 +3,6 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from npabridge.macho import (
-    DATA_BLOB_SIZE,
     IPA_MEMBER,
     SEGMENT_DATA,
     SEGMENT_TEXT,
@@ -14,13 +13,14 @@ from npabridge.macho import (
     snapshot,
 )
 from npabridge.manifest import load_manifest
-from npabridge.payload import PayloadLayout, assemble_payload
+from npabridge.payload import PayloadLayout, assemble_payload, data_size
 
 
 from support import SOURCE_IPA
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
+UNITS = MANIFEST.units()
 BUILD = ROOT / "build" / "macho"
 
 
@@ -35,13 +35,15 @@ class MachOTests(unittest.TestCase):
             cls.baseline.write_bytes(archive.read(IPA_MEMBER))
         cls.layout = BUILD / "test-phase-a"
         cls.patched = BUILD / "test-phase-b"
-        cls.phase_a_report = phase_a(cls.baseline, cls.layout, MANIFEST)
-        cls.phase_b_report = phase_b(cls.layout, cls.patched, MANIFEST)
+        cls.phase_a_report = phase_a(cls.baseline, cls.layout, MANIFEST, UNITS)
+        cls.phase_b_report = phase_b(cls.layout, cls.patched, MANIFEST, UNITS)
 
     def test_phase_a_freezes_the_payload_segments(self):
         report = self.phase_a_report
         self.assertEqual(report["reserved_text"], 7296)
-        self.assertEqual(report["dylib_ordinals"][-1][0], MANIFEST.bridge_path)
+        self.assertEqual(
+            report["dylib_ordinals"][-1][0], MANIFEST.dylib("libass").path
+        )
         after = parse(self.layout)
         text = after.get_segment(SEGMENT_TEXT)
         data = after.get_segment(SEGMENT_DATA)
@@ -94,16 +96,15 @@ class MachOTests(unittest.TestCase):
             PayloadLayout(
                 text_vmaddr=int(text.virtual_address),
                 data_vmaddr=int(data.virtual_address),
-                state_rva=0,
-                slots_rva=8,
             ),
             MANIFEST,
             MANIFEST.target_abi,
+            UNITS,
         )
         raw = self.patched.read_bytes()
         start = int(text.file_offset)
         self.assertEqual(raw[start : start + len(payload.text)], payload.text)
-        blob = raw[int(data.file_offset) : int(data.file_offset) + DATA_BLOB_SIZE]
+        blob = raw[int(data.file_offset) : int(data.file_offset) + data_size(UNITS)]
         self.assertEqual(blob, payload.data)
 
 

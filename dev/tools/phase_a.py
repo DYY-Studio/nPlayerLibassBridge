@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         source = arguments.input or (DEFAULT_INPUT if DEFAULT_INPUT.is_file() else DEFAULT_IPA)
         input_path = extract_clean_main(source, DEFAULT_INPUT)
         manifest = load_manifest(ROOT / "manifests" / "nplayer-3.13.0.json")
-        report = phase_a(input_path, arguments.output, manifest)
+        report = phase_a(input_path, arguments.output, manifest, manifest.units())
         print(json.dumps(report, indent=2, sort_keys=True))
     except Exception as error:
         print(f"phase A failed: {error}", file=sys.stderr)
