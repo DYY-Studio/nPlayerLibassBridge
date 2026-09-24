@@ -40,6 +40,17 @@
       "notes": [
         "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown"
       ]
+    },
+    {
+      "variant": "libass-multiunit",
+      "result": "pending device re-run",
+      "notes": [
+        "clean IPA re-patched after the multi-dylib refactor with `npa-patch --dylib libass`",
+        "artifact build/accept/libass-multiunit.ipa sha256 eb2467aae7c0c2448306b7d170ff374e7bd739d9131742187bc033f94e0b57ad; 21 static checks pass",
+        "the packaged main is byte-identical to the accepted `bridge` variant (19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887); the payload text region is byte-identical to the accepted artifact",
+        "the bundled LibASSBridge.dylib is a local rebuild (signed sha256 b7de5ea3f7ca1804be79328314b1690d231c76fea66784737654583e33913ca3 vs the accepted c63ee049676b27b566a55560b6fd4bf6d0b9eae31f541cc12ee15ee1366b36de) because the dependency closure was rebuilt locally; bridge/npa_ass_bridge.c is unchanged and the rebuild is now deterministic",
+        "TODO: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback on the target device"
+      ]
     }
   ]
 }
