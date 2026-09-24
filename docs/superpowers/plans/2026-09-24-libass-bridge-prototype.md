@@ -112,6 +112,8 @@ nPlayerLibassBridge/
 ### Task 1: Freeze Baseline, Correct Report, and Create Manifest
 
 **Files:**
+- Create: `nPlayerLibassBridge/pyproject.toml`
+- Create: `nPlayerLibassBridge/uv.lock`
 - Create: `nPlayerLibassBridge/manifests/nplayer-3.13.0.json`
 - Create: `nPlayerLibassBridge/npabridge/manifest.py`
 - Create: `nPlayerLibassBridge/tests/test_manifest.py`
@@ -121,7 +123,35 @@ nPlayerLibassBridge/
 - Produces: `load_manifest(path: Path) -> Manifest`
 - Produces: immutable API/callsite/old-target data used by every later task.
 
-- [ ] **Step 1: Correct the two confirmed report errors**
+- [ ] **Step 1: Declare the environment before any test runs**
+
+Task 1 needs a test runner, so the uv environment is declared here; Task 2 Step 2 only re-runs the sync.
+
+`pyproject.toml`:
+
+```toml
+[project]
+name = "nplayer-libass-bridge"
+version = "0.1.0"
+requires-python = ">=3.11,<3.15"
+dependencies = ["lief==1.0.0"]
+
+[dependency-groups]
+dev = ["meson", "ninja", "pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+```
+
+```bash
+uv lock
+uv sync --frozen --all-groups
+```
+
+`uv.lock` is the only lock file. The declared version range is the only Python policy: uv selects or fails; no candidate probing, venv provenance checks, wheel RECORD reconstruction, console-script verification or source-mode fallback.
+
+- [ ] **Step 2: Correct the two confirmed report errors**
 
 Change the `nPlayer.bak` description to “only `0xA0392C` is patched” and replace dyld values with the values below. Also record the newly confirmed omitted boundary call `ass_free_track` at `0x100A03B40 -> 0x100C0A2F4`, and change the app boundary summary to 15 unique APIs / 16 direct call sites.
 
@@ -133,7 +163,7 @@ lazy_bind_off   0x184F860  size 0x6CA8
 export_off      0x1856508  size 0x5BBB8
 ```
 
-- [ ] **Step 2: Write manifest validation tests**
+- [ ] **Step 3: Write manifest validation tests**
 
 Tests cover only machine-checkable facts in the manifest (counts, addresses, symbol spelling).
 
@@ -161,7 +191,7 @@ def test_symbol_spellings_are_distinct(self):
     self.assertEqual(api.macho_name, "_npa_ass_library_init")
 ```
 
-- [ ] **Step 3: Run tests and verify they fail**
+- [ ] **Step 4: Run tests and verify they fail**
 
 Run:
 
@@ -171,7 +201,7 @@ uv run pytest tests/test_manifest.py -v
 
 Expected: import or manifest-file failure.
 
-- [ ] **Step 4: Create the manifest**
+- [ ] **Step 5: Create the manifest**
 
 Include all 15 mappings:
 
@@ -212,7 +242,7 @@ Also record:
 }
 ```
 
-- [ ] **Step 5: Implement manifest dataclasses and BL calculation**
+- [ ] **Step 6: Implement manifest dataclasses and BL calculation**
 
 ```python
 @dataclass(frozen=True)
@@ -230,11 +260,11 @@ class APIBinding:
         return "_" + self.symbol
 ```
 
-- [ ] **Step 6: Run manifest and baseline tests**
+- [ ] **Step 7: Run manifest and baseline tests**
 
 Expected: all tests pass; IPA member hash and every computed original BL word match.
 
-- [ ] **Step 7: Commit checkpoint if authorized**
+- [ ] **Step 8: Commit checkpoint if authorized**
 
 Suggested commit:
 
@@ -244,11 +274,9 @@ fix: freeze libass bridge binary baseline
 
 ---
 
-### Task 2: Bootstrap the uv Environment and Probe iOS ABI
+### Task 2: Build the Patch Toolchain and Probe iOS ABI
 
 **Files:**
-- Create: `nPlayerLibassBridge/pyproject.toml`
-- Create: `nPlayerLibassBridge/uv.lock`
 - Create: `nPlayerLibassBridge/npabridge/toolchain.py`
 - Create: `nPlayerLibassBridge/npabridge/target_abi.py`
 - Create: `nPlayerLibassBridge/tools/doctor.py`
@@ -276,31 +304,13 @@ def test_target_abi_comes_from_ios_sdk(self):
     self.assertEqual(abi.rtld_default_masked, self.expected_rtld_default)
 ```
 
-- [ ] **Step 2: Declare the environment and sync it**
-
-`pyproject.toml`:
-
-```toml
-[project]
-name = "nplayer-libass-bridge"
-version = "0.1.0"
-requires-python = ">=3.11,<3.15"
-dependencies = ["lief==1.0.0"]
-
-[dependency-groups]
-dev = ["meson", "ninja", "pytest"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-```
+- [ ] **Step 2: Sync the environment declared in Task 1**
 
 ```bash
-uv lock
 uv sync --frozen --all-groups
 ```
 
-`uv.lock` is the only lock file. The declared version range is the only Python policy: uv selects or fails; no candidate probing, venv provenance checks, wheel RECORD reconstruction, console-script verification or source-mode fallback.
+`uv.lock` is the only lock file; the declared `requires-python` range is the only Python policy. No candidate probing, venv provenance checks, wheel RECORD reconstruction, console-script verification or source-mode fallback.
 
 - [ ] **Step 3: Build Keystone 0.9.2 from commit `dc7932ef2b2c4a793836caec6ecab485005139d6`**
 
