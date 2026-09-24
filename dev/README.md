@@ -1,0 +1,56 @@
+# Developer material
+
+Everything here exists to build or re-verify the bridge, not to patch an IPA.
+The public flow (`npa-patch`) never touches this directory.
+
+- `smoke/` + `tools/smoke.py` — the BridgeSmoke app that proves the 15-export
+  ABI contract on a device. Requires Xcode and the iOS SDK.
+- `smoke_package.py` — pseudo-signs and packages that app bundle.
+- `tools/phase_a.py`, `tools/phase_b.py` — run the two layout stages separately
+  to isolate a failure. `npa-patch` runs the same functions in one pass.
+- `abi_probe.py` + `target_abi_probe.c` — compile a probe against the iOS SDK
+  and print the constants that `manifests/*.json` freezes in `target_abi`.
+  Run it after an SDK change and compare with the manifest.
+- `acceptance.json` — the recorded device acceptance (iPhone SE 3rd gen,
+  iOS 17.7.2, LiveContainer 3.7.2).
+- `plans/` — the research plan that produced this toolchain.
+- `tests/` — developer tests (dependency closure, Keystone/probe, relinking a
+  bridge with an extra export). Run them explicitly: `uv run pytest dev/tests`.
+  The default `uv run pytest` only covers the public suite.
+
+## Rebuild everything from source
+
+```sh
+uv sync --frozen --all-groups
+make bootstrap deps bridge      # host Keystone, iOS dependency closure, bridge dylib
+make verify test
+```
+
+`deps/sources.lock.json` pins every dependency (version, archive URL, SHA-256);
+the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
+`deps/` is optional for users: the release ships the built `LibASSBridge.dylib`.
+
+## Re-run the device acceptance
+
+1. `make bridge smoke`, then install `dist/smoke.ipa` on a device and read the
+   on-screen log; the last line must be `SMOKE: PASS`.
+2. Patch your own decrypted IPA with the release dylib and walk the subtitle
+   matrix in `plans/2026-09-24-libass-bridge-prototype.md` (Task 11, Step 2-4):
+   SRT, embedded ASS, Matroska embedded fonts, the font cache, seek/flush and
+   continuous playback.
+3. Append the device, iOS version, install method and both results to
+   `acceptance.json`.
+
+The expected packaged main hash is
+`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887`
+(unsigned intermediate: `4bb9f5670062c2a7eee5797a02ccb066abdc68a3610f5b01037e123e862a79f3`).
+
+## Release checklist
+
+1. `make bridge` and `make verify`.
+2. Publish `build/LibASSBridge.dylib` as a release asset together with its
+   SHA-256, `LICENSE` and `THIRD-PARTY.md`.
+3. When any pinned dependency version changes, update `THIRD-PARTY.md` and the
+   manifest's `libass_version` in the same commit.
+4. Run `uv run python dev/abi_probe.py` after an iOS SDK change and re-check
+   the manifest's `target_abi` block.

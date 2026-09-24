@@ -19,7 +19,7 @@ test:
 	$(UV) run pytest
 
 smoke:
-	$(UV) run python tools/smoke.py
+	$(UV) run python dev/tools/smoke.py
 
 clean:
 	rm -rf build dist

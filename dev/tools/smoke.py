@@ -10,15 +10,16 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
-from npabridge import macho, package  # noqa: E402
+from dev.smoke_package import publish_app_bundle  # noqa: E402
+from npabridge import macho  # noqa: E402
 
 
-SOURCE = ROOT / "smoke" / "BridgeSmoke" / "BridgeSmokeApp.m"
-PLIST = ROOT / "smoke" / "BridgeSmoke" / "Info.plist"
+SOURCE = ROOT / "dev" / "smoke" / "BridgeSmoke" / "BridgeSmokeApp.m"
+PLIST = ROOT / "dev" / "smoke" / "BridgeSmoke" / "Info.plist"
 BUNDLE = ROOT / "build" / "smoke" / "BridgeSmoke.app"
 BRIDGE = ROOT / "build" / "LibASSBridge.dylib"
 OUTPUT = ROOT / "dist" / "smoke.ipa"
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=OUTPUT)
     arguments = parser.parse_args(argv)
     try:
-        report = package.publish_app_bundle(build_bundle(), arguments.output)
+        report = publish_app_bundle(build_bundle(), arguments.output)
         print(json.dumps(report, indent=2, sort_keys=True))
     except Exception as error:
         print(f"smoke build failed: {error}", file=sys.stderr)

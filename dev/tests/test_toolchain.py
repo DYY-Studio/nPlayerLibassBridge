@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from dev import abi_probe
 from dev.abi_probe import load_target_abi
 from npabridge.toolchain import Toolchain
 
 
-ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_RTLD_DEFAULT = (1 << 64) - 2
 
 
@@ -61,9 +61,7 @@ def test_target_abi_comes_from_ios_sdk(ios_sdk: Path) -> None:
 def test_target_abi_reads_constants_from_object(
     tmp_path: Path, ios_sdk: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_object = ROOT / "build" / "target_abi_probe.o"
-    if not source_object.is_file():
-        pytest.skip("target ABI probe object is not built")
+    source_object = abi_probe._compile_probe(ios_sdk)
     mutated_object = tmp_path / "target_abi_probe.o"
     shutil.copy2(source_object, mutated_object)
     import lief
