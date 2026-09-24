@@ -1,12 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "nplayer-libass-bridge"
 version = "0.1.0"
-description = "Host tooling for the nPlayer libass bridge prototype"
+description = "Patch an nPlayer IPA with a prebuilt libass 0.17.5 bridge"
 requires-python = ">=3.11,<3.15"
 dependencies = ["lief==1.0.0"]
 
+[project.scripts]
+npa-patch = "npabridge.patch:main"
+
 [dependency-groups]
 dev = ["meson", "ninja", "pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["npabridge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

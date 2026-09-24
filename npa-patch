@@ -1,0 +1,5 @@
+#!/bin/sh
+# Patch an nPlayer IPA with the prebuilt LibASSBridge dylib.
+set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec uv run --no-dev python "$here/tools/patch.py" "$@"
