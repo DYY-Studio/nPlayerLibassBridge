@@ -193,6 +193,11 @@ def install_name(path: Path) -> str:
     return lines[1]
 
 
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
 def _round_up(value: int, alignment: int) -> int:
     return (value + alignment - 1) & ~(alignment - 1)
 
@@ -406,6 +411,27 @@ def write_equal_length(buffer: bytearray, offset: int, payload: bytes) -> None:
 
 def patch_bl(site: int, target: int) -> bytes:
     return struct.pack("<I", encode_bl(site, target))
+
+
+def nop_only_main(baseline: Path, output: Path) -> dict[str, Any]:
+    """Produce the baseline variant: only the two NOP guards change."""
+
+    binary = parse(baseline)
+    raw = bytearray(baseline.read_bytes())
+    for site, expected in NOP_SITES.items():
+        offset = int(binary.virtual_address_to_offset(site))
+        _require(
+            struct.unpack_from("<I", raw, offset)[0] == expected,
+            f"baseline guard at {site:#x} is not the frozen instruction",
+        )
+        write_equal_length(raw, offset, struct.pack("<I", NOP_WORD))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(bytes(raw))
+    return {
+        "output": str(output),
+        "nop_sites": sorted(NOP_SITES),
+        "size": len(raw),
+    }
 
 
 def phase_b(

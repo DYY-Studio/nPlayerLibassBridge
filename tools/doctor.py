@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 
-TOOLS = ("clang", "xcrun", "git", "cmake", "ninja")
+TOOLS = ("clang", "xcrun", "git", "cmake", "ninja", "ldid")
 
 
 def ios_sdk_path() -> Path | None:
