@@ -154,17 +154,6 @@ def version_tuple(value: object) -> list[int]:
     return list(parts + (0,) * (3 - len(parts)))
 
 
-def _otool(flag: str, path: Path) -> list[str]:
-    result = subprocess.run(
-        ["/usr/bin/xcrun", "otool", flag, str(path)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=True,
-    )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-
-
 def xcrun_find(name: str) -> str:
     result = subprocess.run(
         ["/usr/bin/xcrun", "--sdk", "iphoneos", "--find", name],
@@ -180,17 +169,20 @@ def xcrun_find(name: str) -> str:
 
 
 def dependency_lines(path: Path) -> list[str]:
-    lines = _otool("-L", path)
-    if not lines or not lines[0].endswith(":"):
-        raise ValueError(f"otool dependency output has no Mach-O header: {path}")
-    return [line.split()[0] for line in lines[1:]]
+    """Dependencies and the self install name, in otool -L order."""
+
+    binary = parse(path)
+    return [str(library.name) for library in binary.libraries]
 
 
 def install_name(path: Path) -> str:
-    lines = _otool("-D", path)
-    if len(lines) != 2 or not lines[0].endswith(":"):
-        raise ValueError(f"otool install-name output is malformed: {path}")
-    return lines[1]
+    binary = parse(path)
+    if not binary.has(lief.MachO.LoadCommand.TYPE.ID_DYLIB):
+        raise ValueError(f"no LC_ID_DYLIB in {path}")
+    for command in binary.commands:
+        if command.command == lief.MachO.LoadCommand.TYPE.ID_DYLIB:
+            return str(command.name)
+    raise ValueError(f"LC_ID_DYLIB is unreadable in {path}")
 
 
 def _require(condition: bool, message: str) -> None:

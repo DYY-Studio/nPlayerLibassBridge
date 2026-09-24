@@ -1,6 +1,8 @@
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from npabridge import macho
 from npabridge.build_bridge import OUTPUT, nm_exports, verify_bridge
 from npabridge.manifest import load_manifest
 
@@ -22,6 +24,23 @@ class BridgeTests(unittest.TestCase):
         for name in EXPECTED_BRIDGE_SYMBOLS:
             with self.subTest(symbol=name):
                 self.assertFalse(name.startswith("_"))
+
+    def test_metadata_helpers_match_the_built_bridge(self):
+        if not OUTPUT.is_file():
+            self.skipTest("LibASSBridge.dylib is not built")
+        with mock.patch.object(
+            macho.subprocess, "run", side_effect=AssertionError("shelled out")
+        ):
+            self.assertEqual(macho.install_name(OUTPUT), "@rpath/LibASSBridge.dylib")
+            self.assertEqual(
+                macho.dependency_lines(OUTPUT),
+                [
+                    "@rpath/LibASSBridge.dylib",
+                    "/usr/lib/libiconv.2.dylib",
+                    "/usr/lib/libz.1.dylib",
+                    "/usr/lib/libSystem.B.dylib",
+                ],
+            )
 
     def test_bridge_passes_every_artifact_check(self):
         if not OUTPUT.is_file():
