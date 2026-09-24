@@ -2,6 +2,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from . import target_abi
 
@@ -30,24 +31,133 @@ class Callback:
 
 
 @dataclass(frozen=True)
+class Domain:
+    """One independently published unit of a dylib."""
+
+    id: str
+    apis: tuple[APIBinding, ...]
+
+
+@dataclass(frozen=True)
+class Unit:
+    """A domain flattened together with the dylib that carries it."""
+
+    dylib_id: str
+    domain_id: str
+    basename: str
+    apis: tuple[APIBinding, ...]
+
+    @property
+    def id(self) -> str:
+        return f"{self.dylib_id}/{self.domain_id}"
+
+    @property
+    def symbol_count(self) -> int:
+        return len(self.apis)
+
+    @property
+    def call_site_count(self) -> int:
+        return sum(len(api.call_sites) for api in self.apis)
+
+
+@dataclass(frozen=True)
+class ExtraSite:
+    """A site that is rewritten whenever its dylib is installed."""
+
+    site: int
+    expected: int
+    replacement: int
+
+
+@dataclass(frozen=True)
+class BuildSpec:
+    """Dev-only inputs for building this dylib, relative to the repository root."""
+
+    source: str
+    exports: str
+    closure: str
+    include_root: str
+    lib_root: str
+
+
+@dataclass(frozen=True)
+class Dylib:
+    id: str
+    library_version: str
+    basename: str
+    domains: tuple[Domain, ...]
+    extra_sites: tuple[ExtraSite, ...] = ()
+    callback: Callback | None = None
+    build: BuildSpec | None = None
+
+    @property
+    def path(self) -> str:
+        return f"@executable_path/Frameworks/{self.basename}"
+
+    @property
+    def install_name(self) -> str:
+        return f"@rpath/{self.basename}"
+
+
+@dataclass(frozen=True)
 class Manifest:
     imagebase: int
     main_sha256: str
     app_version: str
-    libass_version: str
     target_abi: target_abi.TargetABI
     dlsym_stub: int
     dladdr_stub: int
-    bridge_path: str
-    expected_bridge_basename: str
-    callback: Callback
-    apis: tuple[APIBinding, ...]
+    dylibs: tuple[Dylib, ...]
+
+    def units(self, dylib_ids: Sequence[str] | None = None) -> tuple[Unit, ...]:
+        """Flatten the selected dylibs into their units, in manifest order."""
+
+        selected = self._select(dylib_ids)
+        units = tuple(
+            Unit(
+                dylib_id=dylib.id,
+                domain_id=domain.id,
+                basename=dylib.basename,
+                apis=domain.apis,
+            )
+            for dylib in selected
+            for domain in dylib.domains
+        )
+        if not units:
+            raise ValueError("no bridge unit was selected")
+        return units
+
+    def dylib(self, dylib_id: str) -> Dylib:
+        for dylib in self.dylibs:
+            if dylib.id == dylib_id:
+                return dylib
+        raise KeyError(dylib_id)
+
+    def extra_sites(self, dylib_ids: Sequence[str]) -> tuple[ExtraSite, ...]:
+        wanted = set(dylib_ids)
+        return tuple(
+            site
+            for dylib in self.dylibs
+            if dylib.id in wanted
+            for site in dylib.extra_sites
+        )
 
     def api(self, symbol: str) -> APIBinding:
-        for api in self.apis:
-            if api.symbol == symbol:
-                return api
+        for unit in self.units():
+            for api in unit.apis:
+                if api.symbol == symbol:
+                    return api
         raise KeyError(symbol)
+
+    def _select(self, dylib_ids: Sequence[str] | None) -> tuple[Dylib, ...]:
+        if dylib_ids is None:
+            return self.dylibs
+        wanted = tuple(dict.fromkeys(dylib_ids))
+        known = {dylib.id for dylib in self.dylibs}
+        unknown = [dylib_id for dylib_id in wanted if dylib_id not in known]
+        if unknown:
+            raise KeyError(f"unknown dylib ids: {', '.join(unknown)}")
+        return tuple(dylib for dylib in self.dylibs if dylib.id in set(wanted))
 
 
 def encode_bl(call_site: int, target: int) -> int:
@@ -59,34 +169,74 @@ def encode_bl(call_site: int, target: int) -> int:
     return 0x94000000 | ((displacement >> 2) & 0x03FFFFFF)
 
 
+def _callback(raw: dict | None) -> Callback | None:
+    if raw is None:
+        return None
+    return Callback(
+        app_callback=int(raw["app_callback"], 0),
+        prototype=raw["prototype"],
+        va_list_size=raw["va_list_size"],
+        ignored_argument_register=raw["ignored_argument_register"],
+    )
+
+
+def _build_spec(raw: dict | None) -> BuildSpec | None:
+    if raw is None:
+        return None
+    return BuildSpec(
+        source=raw["source"],
+        exports=raw["exports"],
+        closure=raw["closure"],
+        include_root=raw["include_root"],
+        lib_root=raw["lib_root"],
+    )
+
+
 def load_manifest(path: Path) -> Manifest:
     data = json.loads(path.read_text(encoding="utf-8"))
-    callback = data["callback"]
-    apis = tuple(
-        APIBinding(
-            symbol=api["symbol"],
-            call_sites=tuple(int(value, 0) for value in api["call_sites"]),
-            old_target=int(api["old_target"], 0),
+    dylibs = tuple(
+        Dylib(
+            id=dylib["id"],
+            library_version=dylib["library_version"],
+            basename=dylib["basename"],
+            domains=tuple(
+                Domain(
+                    id=domain["id"],
+                    apis=tuple(
+                        APIBinding(
+                            symbol=api["symbol"],
+                            call_sites=tuple(int(value, 0) for value in api["call_sites"]),
+                            old_target=int(api["old_target"], 0),
+                        )
+                        for api in domain["apis"]
+                    ),
+                )
+                for domain in dylib["domains"]
+            ),
+            extra_sites=tuple(
+                ExtraSite(
+                    site=int(site["site"], 0),
+                    expected=int(site["expected"], 0),
+                    replacement=int(site["replacement"], 0),
+                )
+                for site in dylib.get("extra_sites", ())
+            ),
+            callback=_callback(dylib.get("callback")),
+            build=_build_spec(dylib.get("build")),
         )
-        for api in data["apis"]
+        for dylib in data["dylibs"]
     )
+    identifiers = [dylib.id for dylib in dylibs]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError(f"duplicate dylib ids in {path.name}: {identifiers}")
     return Manifest(
         imagebase=int(data["imagebase"], 0),
         main_sha256=data["main_sha256"],
         app_version=data["app_version"],
-        libass_version=data["libass_version"],
         target_abi=target_abi.from_manifest(data["target_abi"]),
         dlsym_stub=int(data["dlsym_stub"], 0),
         dladdr_stub=int(data["dladdr_stub"], 0),
-        bridge_path=data["bridge_path"],
-        expected_bridge_basename=data["expected_bridge_basename"],
-        callback=Callback(
-            app_callback=int(callback["app_callback"], 0),
-            prototype=callback["prototype"],
-            va_list_size=callback["va_list_size"],
-            ignored_argument_register=callback["ignored_argument_register"],
-        ),
-        apis=apis,
+        dylibs=dylibs,
     )
 
 

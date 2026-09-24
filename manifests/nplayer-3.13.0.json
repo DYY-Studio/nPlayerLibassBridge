@@ -2,7 +2,6 @@
   "imagebase": "0x100000000",
   "main_sha256": "28e4a62ca87642338deeedbaf144bb8e4b3a801963abcdb59434aae88369b2b8",
   "app_version": "3.13.0",
-  "libass_version": "0.17.5",
   "target_abi": {
     "platform": "IOS",
     "minos": [13, 0, 0],
@@ -16,89 +15,118 @@
   },
   "dlsym_stub": "0x1011362CC",
   "dladdr_stub": "0x10113629C",
-  "bridge_path": "@executable_path/Frameworks/LibASSBridge.dylib",
-  "expected_bridge_basename": "LibASSBridge.dylib",
-  "callback": {
-    "app_callback": "0x100A033C4",
-    "prototype": "void(int, const char *, va_list, void *)",
-    "va_list_size": 8,
-    "ignored_argument_register": "x3"
-  },
-  "apis": [
+  "dylibs": [
     {
-      "symbol": "npa_ass_library_init",
-      "call_sites": ["0x100A03F50"],
-      "old_target": "0x100C296AC"
-    },
-    {
-      "symbol": "npa_ass_set_extract_fonts",
-      "call_sites": ["0x100A03FA0"],
-      "old_target": "0x100C29A9C"
-    },
-    {
-      "symbol": "npa_ass_set_message_cb",
-      "call_sites": ["0x100A03FB4"],
-      "old_target": "0x100C29D48"
-    },
-    {
-      "symbol": "npa_ass_renderer_init",
-      "call_sites": ["0x100A03FBC"],
-      "old_target": "0x100C15D24"
-    },
-    {
-      "symbol": "npa_ass_set_frame_size",
-      "call_sites": ["0x100A03FC8"],
-      "old_target": "0x100C2FEF8"
-    },
-    {
-      "symbol": "npa_ass_set_fonts_dir",
-      "call_sites": ["0x100A04680"],
-      "old_target": "0x100C297EC"
-    },
-    {
-      "symbol": "npa_ass_new_track",
-      "call_sites": ["0x100A047E8"],
-      "old_target": "0x100C0BD68"
-    },
-    {
-      "symbol": "npa_ass_process_codec_private",
-      "call_sites": ["0x100A04800"],
-      "old_target": "0x100C0B314"
-    },
-    {
-      "symbol": "npa_ass_process_data",
-      "call_sites": ["0x100A0482C", "0x100A0529C"],
-      "old_target": "0x100C0B060"
-    },
-    {
-      "symbol": "npa_ass_free_track",
-      "call_sites": ["0x100A03B40"],
-      "old_target": "0x100C0A2F4"
-    },
-    {
-      "symbol": "npa_ass_flush_events",
-      "call_sites": ["0x100A062F8"],
-      "old_target": "0x100C0B9F0"
-    },
-    {
-      "symbol": "npa_ass_render_frame",
-      "call_sites": ["0x100A06408"],
-      "old_target": "0x100C169F0"
-    },
-    {
-      "symbol": "npa_ass_renderer_done",
-      "call_sites": ["0x100A035EC"],
-      "old_target": "0x100C15F88"
-    },
-    {
-      "symbol": "npa_ass_library_done",
-      "call_sites": ["0x100A035F4"],
-      "old_target": "0x100C2978C"
-    },
-    {
-      "symbol": "npa_ass_set_fonts",
-      "call_sites": ["0x100A0394C"],
-      "old_target": "0x100C30174"
+      "id": "libass",
+      "library_version": "0.17.5",
+      "basename": "LibASSBridge.dylib",
+      "callback": {
+        "app_callback": "0x100A033C4",
+        "prototype": "void(int, const char *, va_list, void *)",
+        "va_list_size": 8,
+        "ignored_argument_register": "x3"
+      },
+      "extra_sites": [
+        {
+          "site": "0x100A0392C",
+          "expected": "0x35000148",
+          "replacement": "0xD503201F"
+        },
+        {
+          "site": "0x100ACBC14",
+          "expected": "0x37000080",
+          "replacement": "0xD503201F"
+        }
+      ],
+      "build": {
+        "source": "bridge/npa_ass_bridge.c",
+        "exports": "bridge/bridge.exports",
+        "closure": "build/deps/libass-closure.txt",
+        "include_root": "build/deps/include",
+        "lib_root": "build/deps/lib"
+      },
+      "domains": [
+        {
+          "id": "libass",
+          "apis": [
+            {
+              "symbol": "npa_ass_library_init",
+              "call_sites": ["0x100A03F50"],
+              "old_target": "0x100C296AC"
+            },
+            {
+              "symbol": "npa_ass_set_extract_fonts",
+              "call_sites": ["0x100A03FA0"],
+              "old_target": "0x100C29A9C"
+            },
+            {
+              "symbol": "npa_ass_set_message_cb",
+              "call_sites": ["0x100A03FB4"],
+              "old_target": "0x100C29D48"
+            },
+            {
+              "symbol": "npa_ass_renderer_init",
+              "call_sites": ["0x100A03FBC"],
+              "old_target": "0x100C15D24"
+            },
+            {
+              "symbol": "npa_ass_set_frame_size",
+              "call_sites": ["0x100A03FC8"],
+              "old_target": "0x100C2FEF8"
+            },
+            {
+              "symbol": "npa_ass_set_fonts_dir",
+              "call_sites": ["0x100A04680"],
+              "old_target": "0x100C297EC"
+            },
+            {
+              "symbol": "npa_ass_new_track",
+              "call_sites": ["0x100A047E8"],
+              "old_target": "0x100C0BD68"
+            },
+            {
+              "symbol": "npa_ass_process_codec_private",
+              "call_sites": ["0x100A04800"],
+              "old_target": "0x100C0B314"
+            },
+            {
+              "symbol": "npa_ass_process_data",
+              "call_sites": ["0x100A0482C", "0x100A0529C"],
+              "old_target": "0x100C0B060"
+            },
+            {
+              "symbol": "npa_ass_free_track",
+              "call_sites": ["0x100A03B40"],
+              "old_target": "0x100C0A2F4"
+            },
+            {
+              "symbol": "npa_ass_flush_events",
+              "call_sites": ["0x100A062F8"],
+              "old_target": "0x100C0B9F0"
+            },
+            {
+              "symbol": "npa_ass_render_frame",
+              "call_sites": ["0x100A06408"],
+              "old_target": "0x100C169F0"
+            },
+            {
+              "symbol": "npa_ass_renderer_done",
+              "call_sites": ["0x100A035EC"],
+              "old_target": "0x100C15F88"
+            },
+            {
+              "symbol": "npa_ass_library_done",
+              "call_sites": ["0x100A035F4"],
+              "old_target": "0x100C2978C"
+            },
+            {
+              "symbol": "npa_ass_set_fonts",
+              "call_sites": ["0x100A0394C"],
+              "old_target": "0x100C30174"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
