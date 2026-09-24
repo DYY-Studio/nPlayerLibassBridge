@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEPS = ROOT / "deps"
 LOCK_PATH = DEPS / "sources.lock.json"
 CROSS_FILE = DEPS / "ios-arm64.cross"
+NATIVE_FILE = DEPS / "macos-arm64.native"
 BUILD_ROOT = ROOT / "build" / "deps"
 DOWNLOAD_ROOT = BUILD_ROOT / "downloads"
 SOURCE_ROOT = BUILD_ROOT / "sources"
@@ -272,6 +273,8 @@ Cflags: -I${{includedir}}
 
 
 def _build_environment(lock: dict[str, Any]) -> dict[str, str]:
+    """Environment for autoconf (Expat) and for plain ar/ranlib work."""
+
     sdk = sdk_path()
     _write_pkg_config(lock, sdk)
     for directory in (BUILD_DIR, PREFIX_ROOT, LIB_ROOT, INCLUDE_ROOT):
@@ -309,6 +312,31 @@ def _build_environment(lock: dict[str, Any]) -> dict[str, str]:
             "SDKROOT": "iphoneos",
             "IPHONEOS_DEPLOYMENT_TARGET": "13.0",
             "ARCHS": "arm64",
+            "PYTHON": sys.executable,
+        }
+    )
+
+
+def _meson_environment(lock: dict[str, Any]) -> dict[str, str]:
+    """Environment for Meson.
+
+    The cross and native files carry every compiler, flag and target
+    detail, so no SDKROOT, CFLAGS or CC leaks into the native compiler.
+    """
+
+    _write_pkg_config(lock, sdk_path())
+    for directory in (BUILD_DIR, PREFIX_ROOT, LIB_ROOT, INCLUDE_ROOT):
+        directory.mkdir(parents=True, exist_ok=True)
+    pkg_config = host_tool("pkg-config")
+    venv_bin = str(Path(host_tool("meson")).parent)
+    return isolated_environment(
+        {
+            "PKG_CONFIG": pkg_config,
+            "PKG_CONFIG_LIBDIR": str(PKGCONFIG_ROOT),
+            "PKG_CONFIG_PATH": "",
+            "NINJA": host_tool("ninja"),
+            "MESON": host_tool("meson"),
+            "PATH": os.pathsep.join([venv_bin, str(Path(pkg_config).parent), SYSTEM_PATH]),
             "PYTHON": sys.executable,
         }
     )
@@ -361,6 +389,8 @@ def _meson_setup(source: Path, name: str, lock: dict[str, Any], env: dict[str, s
         str(source),
         "--cross-file",
         str(CROSS_FILE),
+        "--native-file",
+        str(NATIVE_FILE),
         "--backend=ninja",
         "--buildtype=release",
         "--wrap-mode=nodownload",
@@ -554,7 +584,9 @@ def _validate_archive(archive: Path, env: dict[str, str]) -> dict[str, Any]:
         directory = Path(temporary)
         for member in objects:
             run([_xcrun("ar", "iphoneos"), "-x", archive, member], env, directory)
-            binary = list(lief.MachO.parse(str(directory / member)) or [])
+            object_path = directory / member
+            parsed = lief.MachO.parse(str(object_path))
+            binary = list(parsed) if parsed is not None else []
             if len(binary) != 1:
                 raise ValueError(f"archive member is not one Mach-O object: {member}")
             header = binary[0].header
@@ -579,7 +611,7 @@ def _validate_archive(archive: Path, env: dict[str, str]) -> dict[str, Any]:
 def verify_closure(lock: dict[str, Any] | None = None) -> dict[str, Any]:
     lock = load_lock() if lock is None else lock
     validate_cross_file()
-    env = _build_environment(lock)
+    env = _meson_environment(lock)
     archives: dict[str, Any] = {}
     paths: list[Path] = []
     for name in lock["build_order"]:
@@ -617,17 +649,24 @@ def verify_closure(lock: dict[str, Any] | None = None) -> dict[str, Any]:
     return report
 
 
+def _reset_build_tree() -> None:
+    for name in ("sources", "build", "prefix", "lib", "include", "pkgconfig"):
+        path = BUILD_ROOT / name
+        if path.exists():
+            shutil.rmtree(path)
+    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
+
+
 def build_all() -> dict[str, Any]:
     lock = load_lock()
     validate_cross_file()
-    if BUILD_ROOT.exists():
-        shutil.rmtree(BUILD_ROOT)
-    BUILD_ROOT.mkdir(parents=True)
+    _reset_build_tree()
     env = _build_environment(lock)
+    meson_env = _meson_environment(lock)
     for name in lock["build_order"]:
         print(f"building {name}", flush=True)
         source = _apply_source_patches(extract_source(name, lock), lock, name)
-        BUILDERS[name](source, lock, env)
+        BUILDERS[name](source, lock, env if name == "expat" else meson_env)
     return verify_closure(lock)
 
 

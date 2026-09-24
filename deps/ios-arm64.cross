@@ -1,3 +1,10 @@
+[binaries]
+c = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'clang']
+cpp = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'clang++']
+ar = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'ar']
+ranlib = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'ranlib']
+strip = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'strip']
+
 [host_machine]
 system = 'darwin'
 cpu_family = 'aarch64'
@@ -7,3 +14,9 @@ endian = 'little'
 [properties]
 target = 'arm64-apple-ios13.0'
 needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['-target', 'arm64-apple-ios13.0', '-arch', 'arm64', '-miphoneos-version-min=13.0', '-g0']
+cpp_args = ['-target', 'arm64-apple-ios13.0', '-arch', 'arm64', '-miphoneos-version-min=13.0', '-g0', '-stdlib=libc++']
+c_link_args = ['-target', 'arm64-apple-ios13.0', '-arch', 'arm64', '-miphoneos-version-min=13.0']
+cpp_link_args = ['-target', 'arm64-apple-ios13.0', '-arch', 'arm64', '-miphoneos-version-min=13.0', '-stdlib=libc++']

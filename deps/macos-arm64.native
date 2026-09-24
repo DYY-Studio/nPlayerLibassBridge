@@ -1,0 +1,5 @@
+[binaries]
+c = ['/usr/bin/xcrun', '--sdk', 'macosx', 'clang']
+cpp = ['/usr/bin/xcrun', '--sdk', 'macosx', 'clang++']
+ar = ['/usr/bin/xcrun', '--sdk', 'macosx', 'ar']
+ranlib = ['/usr/bin/xcrun', '--sdk', 'macosx', 'ranlib']
