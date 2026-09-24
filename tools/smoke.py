@@ -49,6 +49,8 @@ def build_bundle(bundle: Path = BUNDLE) -> Path:
             "Foundation",
             "-framework",
             "UIKit",
+            "-framework",
+            "CoreText",
             "-o",
             str(binary),
             str(SOURCE),

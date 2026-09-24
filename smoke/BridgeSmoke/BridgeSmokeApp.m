@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <CoreText/CoreText.h>
 #import <dlfcn.h>
 #import <stdarg.h>
 #import <stdio.h>
@@ -74,24 +75,41 @@ static void SmokeMessageCallback(int level, const char *format, va_list args, vo
     Report(@"libass[%d] %s", level, buffer);
 }
 
-static NSString *WriteFontConfig(void) {
-    NSString *directory = NSTemporaryDirectory();
-    NSString *path = [directory stringByAppendingPathComponent:@"bridgesmoke-fonts.conf"];
-    NSString *body =
-        @"<?xml version=\"1.0\"?>\n"
-        @"<fontconfig>\n"
-        @"  <dir>/System/Library/Fonts</dir>\n"
-        @"  <dir>/Library/Fonts</dir>\n"
-        @"  <cachedir>@CACHE@</cachedir>\n"
-        @"</fontconfig>\n";
-    body = [body stringByReplacingOccurrencesOfString:@"@CACHE@" withString:directory];
+// The bridge renders with the Fontconfig provider; the system font file is
+// resolved through CoreText so the smoke does not depend on a font directory
+// layout. ass_set_fonts_dir() is the embedded-font directory only, so it is
+// pointed at an empty scratch directory instead of a system tree.
+static NSString *SystemFontPath(NSString *name) {
+    CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)name, 12.0, NULL);
+    if (font == NULL) {
+        return nil;
+    }
+    CFURLRef url = (CFURLRef)CTFontCopyAttribute(font, kCTFontURLAttribute);
+    CFRelease(font);
+    if (url == NULL) {
+        return nil;
+    }
+    NSString *path = [(__bridge NSURL *)url path];
+    CFRelease(url);
+    return path;
+}
+
+static NSString *WriteFontConfig(NSArray<NSString *> *directories, NSString *cacheDirectory) {
+    NSString *path = [cacheDirectory stringByAppendingPathComponent:@"bridgesmoke-fonts.conf"];
+    NSMutableString *body = [NSMutableString string];
+    [body appendString:@"<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n"];
+    for (NSString *directory in directories) {
+        [body appendFormat:@"<dir>%@</dir>\n", directory];
+    }
+    [body appendFormat:@"<cachedir>%@</cachedir>\n</fontconfig>\n", cacheDirectory];
     NSError *error = nil;
     if (![body writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
         Report(@"FAIL fontconfig file: %@", error);
         gFailed = YES;
     }
+    Report(@"font.conf:\n%@", body);
     setenv("FONTCONFIG_FILE", path.UTF8String, 1);
-    setenv("FONTCONFIG_PATH", directory.UTF8String, 1);
+    setenv("FONTCONFIG_PATH", cacheDirectory.UTF8String, 1);
     return path;
 }
 
@@ -158,14 +176,38 @@ static void RunSmoke(void) {
     FreeTrack freeTrack = (FreeTrack)symbols[13];
     FlushEvents flushEvents = (FlushEvents)symbols[14];
 
-    WriteFontConfig();
+    NSString *scratch = [NSTemporaryDirectory() stringByAppendingPathComponent:@"bridgesmoke"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:scratch
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:NULL];
+    NSString *embedded = [scratch stringByAppendingPathComponent:@"embedded-fonts"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:embedded
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:NULL];
+
+    NSString *defaultFont = SystemFontPath(@"Helvetica") ?: SystemFontPath(@"Arial");
+    NSString *fontDirectory = [defaultFont stringByDeletingLastPathComponent];
+    NSMutableArray<NSString *> *directories = [NSMutableArray array];
+    for (NSString *candidate in @[scratch, fontDirectory ?: @""]) {
+        if (candidate.length && ![[NSFileManager defaultManager] fileExistsAtPath:candidate]) {
+            continue;
+        }
+        if (candidate.length && ![directories containsObject:candidate]) {
+            [directories addObject:candidate];
+        }
+    }
+    Report(@"system font: %@", defaultFont ?: @"(none)");
+    Report(@"font dirs: %@", directories);
+    WriteFontConfig(directories, scratch);
 
     ASS_Library *library = libraryInit();
     Check(library != NULL, @"library_init");
     if (library == NULL) {
         return;
     }
-    setFontsDir(library, "/System/Library/Fonts");
+    setFontsDir(library, embedded.UTF8String);
     setExtractFonts(library, 1);
     setMessageCb(library, SmokeMessageCallback, NULL);
     Report(@"PASS library configuration");
@@ -177,7 +219,7 @@ static void RunSmoke(void) {
         return;
     }
     setFrameSize(renderer, 640, 360);
-    setFonts(renderer, NULL, NULL, 3 /* ASS_FONTPROVIDER_FONTCONFIG */, NULL, 1);
+    setFonts(renderer, defaultFont.UTF8String, "Helvetica", 3 /* ASS_FONTPROVIDER_FONTCONFIG */, NULL, 1);
     Report(@"PASS frame size and fonts");
 
     ASS_Track *track = newTrack(library);
@@ -188,22 +230,24 @@ static void RunSmoke(void) {
         return;
     }
     const char *header =
-        "[Script Info]\n"
-        "ScriptType: v4.00+\n"
-        "PlayResX: 640\n"
-        "PlayResY: 360\n"
-        "\n"
-        "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Default,Helvetica,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n"
-        "\n"
-        "[Events]\n";
+        "[Script Info]\r\n"
+        "ScriptType: v4.00+\r\n"
+        "PlayResX: 640\r\n"
+        "PlayResY: 360\r\n"
+        "\r\n"
+        "[V4+ Styles]\r\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\r\n"
+        "Style: Default,Helvetica,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\r\n"
+        "\r\n";
     processCodecPrivate(track, header, (int)strlen(header));
-    const char *event =
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-        "Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,Smoke\n";
-    processData(track, event, (int)strlen(event));
+    // Flush before adding events: ass_flush_events() frees every event.
     flushEvents(track);
+    const char *events = "[Events]\r\n";
+    processData(track, events, (int)strlen(events));
+    const char *event =
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n"
+        "Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,Smoke\r\n";
+    processData(track, event, (int)strlen(event));
     Report(@"PASS track setup");
 
     int detect_change = 0;
