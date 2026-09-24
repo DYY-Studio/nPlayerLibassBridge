@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import target_abi
+
 
 @dataclass(frozen=True)
 class APIBinding:
@@ -30,6 +32,9 @@ class Callback:
 class Manifest:
     imagebase: int
     main_sha256: str
+    app_version: str
+    libass_version: str
+    target_abi: target_abi.TargetABI
     dlsym_stub: int
     dladdr_stub: int
     bridge_path: str
@@ -67,6 +72,9 @@ def load_manifest(path: Path) -> Manifest:
     return Manifest(
         imagebase=int(data["imagebase"], 0),
         main_sha256=data["main_sha256"],
+        app_version=data["app_version"],
+        libass_version=data["libass_version"],
+        target_abi=target_abi.from_manifest(data["target_abi"]),
         dlsym_stub=int(data["dlsym_stub"], 0),
         dladdr_stub=int(data["dladdr_stub"], 0),
         bridge_path=data["bridge_path"],

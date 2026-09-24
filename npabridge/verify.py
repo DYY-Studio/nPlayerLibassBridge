@@ -17,7 +17,7 @@ from typing import Any, Callable
 from . import macho
 from .manifest import Manifest, encode_bl
 from .payload import Payload, PayloadLayout, assemble_payload
-from .target_abi import TargetABI, load_target_abi
+from .target_abi import TargetABI
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -288,7 +288,7 @@ def verify_payload(
 ) -> VerificationReport:
     """Verify the payload text, state word and slot table of one main."""
 
-    abi = target_abi or load_target_abi(macho.sdk_path())
+    abi = target_abi or manifest.target_abi
     checks = _Checks()
     _payload_checks(checks, binary, manifest, abi)
     return VerificationReport(str(macho.SEGMENT_TEXT), "payload", tuple(checks.checks))
@@ -305,7 +305,7 @@ def verify_main(
 
     baseline = Path(baseline).resolve()
     patched = Path(patched).resolve()
-    abi = target_abi or load_target_abi(macho.sdk_path())
+    abi = target_abi or manifest.target_abi
     checks = _Checks()
     try:
         before = macho.parse(baseline)
@@ -518,7 +518,7 @@ def verify_artifact(
 ) -> VerificationReport:
     """Verify one packaged pair and merge the bridge checks when present."""
 
-    abi = target_abi or load_target_abi(macho.sdk_path())
+    abi = target_abi or manifest.target_abi
     resolved = mode or ("bridge" if bridge else "fallback")
     main = verify_main(baseline, patched, manifest, resolved, abi)
     if bridge is None:

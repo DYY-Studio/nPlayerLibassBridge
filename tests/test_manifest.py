@@ -112,6 +112,22 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(self.manifest.callback.va_list_size, 8)
         self.assertEqual(self.manifest.callback.ignored_argument_register, "x3")
 
+    def test_manifest_declares_the_version_and_the_frozen_abi(self):
+        self.assertEqual(self.manifest.app_version, "3.13.0")
+        self.assertEqual(self.manifest.libass_version, "0.17.5")
+        self.assertEqual(self.manifest.target_abi.platform.upper(), "IOS")
+        self.assertEqual(self.manifest.target_abi.dl_info_size, 32)
+        self.assertEqual(
+            (
+                self.manifest.target_abi.dl_info_fname_offset,
+                self.manifest.target_abi.dl_info_fbase_offset,
+                self.manifest.target_abi.dl_info_sname_offset,
+                self.manifest.target_abi.dl_info_saddr_offset,
+            ),
+            (0, 8, 16, 24),
+        )
+        self.assertEqual(self.manifest.target_abi.rtld_default_masked, (1 << 64) - 2)
+
     def test_ipa_member_matches_manifest_hash(self):
         digest = hashlib.sha256(self.main_bytes).hexdigest()
         self.assertEqual(digest, self.manifest.main_sha256)

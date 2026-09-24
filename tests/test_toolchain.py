@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from npabridge.target_abi import load_target_abi
+from dev.abi_probe import load_target_abi
 from npabridge.toolchain import Toolchain
 
 
@@ -80,7 +80,7 @@ def test_target_abi_reads_constants_from_object(
     )
     mutated_object.write_bytes(data)
     monkeypatch.setattr(
-        "npabridge.target_abi._compile_probe", lambda _sdk: mutated_object
+        "dev.abi_probe._compile_probe", lambda _sdk: mutated_object
     )
     abi = load_target_abi(ios_sdk)
     assert abi.dl_info_size == 40

@@ -10,13 +10,11 @@ from npabridge.macho import (
     parse,
     phase_a,
     phase_b,
-    sdk_path,
     section_bytes,
     snapshot,
 )
 from npabridge.manifest import load_manifest
 from npabridge.payload import PayloadLayout, assemble_payload
-from npabridge.target_abi import load_target_abi
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,7 +95,7 @@ class MachOTests(unittest.TestCase):
                 slots_rva=8,
             ),
             MANIFEST,
-            load_target_abi(sdk_path()),
+            MANIFEST.target_abi,
         )
         raw = self.patched.read_bytes()
         start = int(text.file_offset)

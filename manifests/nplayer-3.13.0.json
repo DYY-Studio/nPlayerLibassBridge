@@ -1,6 +1,19 @@
 {
   "imagebase": "0x100000000",
   "main_sha256": "28e4a62ca87642338deeedbaf144bb8e4b3a801963abcdb59434aae88369b2b8",
+  "app_version": "3.13.0",
+  "libass_version": "0.17.5",
+  "target_abi": {
+    "platform": "IOS",
+    "minos": [13, 0, 0],
+    "sdk": [26, 2, 0],
+    "dl_info_size": 32,
+    "dl_info_fname_offset": 0,
+    "dl_info_fbase_offset": 8,
+    "dl_info_sname_offset": 16,
+    "dl_info_saddr_offset": 24,
+    "rtld_default_masked": "0xfffffffffffffffe"
+  },
   "dlsym_stub": "0x1011362CC",
   "dladdr_stub": "0x10113629C",
   "bridge_path": "@executable_path/Frameworks/LibASSBridge.dylib",

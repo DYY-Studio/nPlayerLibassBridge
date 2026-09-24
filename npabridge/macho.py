@@ -21,7 +21,7 @@ import lief
 
 from .manifest import Manifest, encode_bl
 from .payload import PayloadLayout, assemble_payload, measure_payload
-from .target_abi import TargetABI, load_target_abi
+from .target_abi import TargetABI
 
 
 TARGET = "arm64-apple-ios13.0"
@@ -275,7 +275,7 @@ def phase_a(
 ) -> dict[str, Any]:
     """Rebuild the load commands and freeze the payload segment layout."""
 
-    abi = target_abi or load_target_abi(sdk_path())
+    abi = target_abi or manifest.target_abi
     preflight(input_path, manifest)
     binary = parse(input_path)
     provisional = provisional_layout(binary)
@@ -380,7 +380,7 @@ def phase_b(
 ) -> dict[str, Any]:
     """Write the payload and the branch patches into the frozen layout."""
 
-    abi = target_abi or load_target_abi(sdk_path())
+    abi = target_abi or manifest.target_abi
     binary = parse(layout_path)
     text = binary.get_segment(SEGMENT_TEXT)
     data = binary.get_segment(SEGMENT_DATA)
