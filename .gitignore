@@ -1,0 +1,21 @@
+# Local build and bootstrap outputs
+build/
+.venv/
+dist/
+*.ipa
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Local tool and scratch state
+*.log
+*.tmp
+.DS_Store
