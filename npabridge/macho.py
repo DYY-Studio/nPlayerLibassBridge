@@ -131,6 +131,68 @@ def section_bytes(binary: Any) -> dict[str, bytes]:
     }
 
 
+def exported_symbols(binary: Any) -> list[str]:
+    return sorted({str(symbol.name) for symbol in binary.exported_symbols})
+
+
+def imported_symbols(binary: Any) -> list[str]:
+    return sorted({str(symbol.name) for symbol in binary.imported_symbols})
+
+
+def section_size(binary: Any, name: str) -> int:
+    return sum(int(section.size) for section in binary.sections if str(section.name) == name)
+
+
+def enum_name(value: object) -> str:
+    return str(value).rsplit(".", 1)[-1].upper()
+
+
+def version_tuple(value: object) -> list[int]:
+    parts = tuple(int(part) for part in value)
+    if len(parts) > 3:
+        raise ValueError(f"invalid Mach-O version: {parts}")
+    return list(parts + (0,) * (3 - len(parts)))
+
+
+def _otool(flag: str, path: Path) -> list[str]:
+    result = subprocess.run(
+        ["/usr/bin/xcrun", "otool", flag, str(path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def xcrun_find(name: str) -> str:
+    result = subprocess.run(
+        ["/usr/bin/xcrun", "--sdk", "iphoneos", "--find", name],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+    path = result.stdout.strip()
+    if not path:
+        raise RuntimeError(f"xcrun could not find {name}")
+    return path
+
+
+def dependency_lines(path: Path) -> list[str]:
+    lines = _otool("-L", path)
+    if not lines or not lines[0].endswith(":"):
+        raise ValueError(f"otool dependency output has no Mach-O header: {path}")
+    return [line.split()[0] for line in lines[1:]]
+
+
+def install_name(path: Path) -> str:
+    lines = _otool("-D", path)
+    if len(lines) != 2 or not lines[0].endswith(":"):
+        raise ValueError(f"otool install-name output is malformed: {path}")
+    return lines[1]
+
+
 def _round_up(value: int, alignment: int) -> int:
     return (value + alignment - 1) & ~(alignment - 1)
 

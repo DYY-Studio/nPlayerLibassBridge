@@ -1,0 +1,93 @@
+import struct
+import unittest
+from pathlib import Path
+from zipfile import ZipFile
+
+from npabridge import build_bridge, macho
+from npabridge.manifest import encode_bl, load_manifest
+from npabridge.macho import IPA_MEMBER, parse, phase_a, phase_b
+from npabridge.verify import VerificationError, verify_artifact, verify_bridge
+
+ROOT = Path(__file__).resolve().parents[1]
+IPA = ROOT.parent / "nPlayer_3.13.0.ipa"
+MANIFEST = load_manifest(ROOT / "manifests/nplayer-3.13.0.json")
+BUILD = ROOT / "build" / "macho"
+
+
+class VerifyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        BUILD.mkdir(parents=True, exist_ok=True)
+        cls.baseline = BUILD / "verify-clean-main"
+        with ZipFile(IPA) as archive:
+            cls.baseline.write_bytes(archive.read(IPA_MEMBER))
+        cls.layout = BUILD / "verify-phase-a"
+        cls.patched = BUILD / "verify-phase-b"
+        phase_a(cls.baseline, cls.layout, MANIFEST)
+        phase_b(cls.layout, cls.patched, MANIFEST)
+
+    def test_valid_artifact_passes_every_check(self):
+        report = verify_artifact(
+            self.baseline,
+            self.patched,
+            MANIFEST,
+            build_bridge.OUTPUT if build_bridge.OUTPUT.is_file() else None,
+        )
+        report.require()
+        self.assertEqual(report.state_initial, 0)
+        for check in report.checks:
+            self.assertTrue(check.ok, check)
+
+    def test_extra_export_is_rejected(self):
+        exports = (ROOT / "bridge" / "bridge.exports").read_text(encoding="utf-8")
+        mutated_exports = ROOT / "build" / "macho" / "mutated.exports"
+        mutated_exports.write_text(exports + "_ass_library_init\n", encoding="utf-8")
+        archives, link_args = build_bridge.load_closure()
+        mutated = ROOT / "build" / "macho" / "mutated-bridge.dylib"
+        build_bridge.link_bridge(
+            macho.sdk_path(),
+            archives,
+            link_args,
+            mutated,
+            export_list=mutated_exports,
+        )
+        self.assertEqual(len(macho.exported_symbols(macho.parse(mutated))), 16)
+        report = verify_bridge(mutated, MANIFEST)
+        with self.assertRaises(VerificationError) as caught:
+            report.require()
+        self.assertIn("bridge.exports", caught.exception.codes)
+
+    def test_wrong_call_site_is_rejected(self):
+        mutated = self._mutate(self.patched, "mutated-callsite")
+        site = MANIFEST.api("npa_ass_render_frame").call_sites[0]
+        binary = parse(mutated)
+        offset = int(binary.virtual_address_to_offset(site))
+        raw = bytearray(mutated.read_bytes())
+        raw[offset : offset + 4] = struct.pack("<I", encode_bl(site, 0x100A00000))
+        mutated.write_bytes(bytes(raw))
+        report = verify_artifact(self.baseline, mutated, MANIFEST)
+        with self.assertRaises(VerificationError) as caught:
+            report.require()
+        self.assertIn("main.instructions", caught.exception.codes)
+
+    def test_non_zero_state_is_rejected(self):
+        mutated = self._mutate(self.patched, "mutated-state")
+        binary = parse(mutated)
+        segment = binary.get_segment(macho.SEGMENT_DATA)
+        raw = bytearray(mutated.read_bytes())
+        offset = int(segment.file_offset)
+        raw[offset : offset + 4] = struct.pack("<I", 1)
+        mutated.write_bytes(bytes(raw))
+        report = verify_artifact(self.baseline, mutated, MANIFEST)
+        with self.assertRaises(VerificationError) as caught:
+            report.require()
+        self.assertIn("payload.state", caught.exception.codes)
+
+    def _mutate(self, source: Path, name: str) -> Path:
+        destination = source.parent / name
+        destination.write_bytes(source.read_bytes())
+        return destination
+
+
+if __name__ == "__main__":
+    unittest.main()
