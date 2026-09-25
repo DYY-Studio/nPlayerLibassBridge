@@ -47,6 +47,8 @@
     "-framework",
     "CoreVideo",
     "-framework",
+    "Security",
+    "-framework",
     "CoreFoundation",
     "-framework",
     "CoreServices"
@@ -80,6 +82,7 @@
     "--enable-bzlib",
     "--enable-iconv",
     "--enable-videotoolbox",
+    "--enable-securetransport",
     "--enable-libdav1d"
   ]
 }
