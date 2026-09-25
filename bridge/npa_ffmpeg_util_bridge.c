@@ -10,6 +10,15 @@
  * av_channel_layout_from_mask() and swr_alloc_set_opts2(). Note that the 4.4
  * prototype returns the SwrContext pointer, not an error code, and that the
  * caller keeps the swr_init() responsibility.
+ *
+ * AVPixelFormat is the one argument that is not version-neutral: 4.4 still
+ * numbers three members that modern FFmpeg removed, so the enum the app passes
+ * and the enum the modern scaler reads disagree from AV_PIX_FMT_VAAPI on. The
+ * swscale shims translate before they forward; see npa_modern_pixfmt(). The
+ * shims that only move opaque contexts or raw planes (sws_alloc_context,
+ * sws_scale, sws_freeContext, all swr_*) need no translation, and the other
+ * enums that cross the boundary (AVSampleFormat, SWS_*) are identical in both
+ * versions.
  */
 
 #include <stdint.h>
@@ -21,6 +30,63 @@
 
 #define NPA_EXPORT __attribute__((visibility("default")))
 
+/*
+ * Legacy AVPixelFormat -> modern AVPixelFormat.
+ *
+ * FFmpeg 4.4 numbers three members that modern FFmpeg no longer has, and all
+ * three sit inside the enum instead of at its end, so every later value moved:
+ *
+ *   legacy 44  AV_PIX_FMT_VAAPI_MOCO   \
+ *   legacy 45  AV_PIX_FMT_VAAPI_IDCT    > dropped; modern 44 is AV_PIX_FMT_VAAPI
+ *   legacy 46  AV_PIX_FMT_VAAPI        /
+ *   legacy 153 AV_PIX_FMT_XVMC           dropped, no replacement
+ *   legacy 198 AV_PIX_FMT_NB             one past the last 4.4 format
+ *
+ * Hence: 0..45 unchanged, 46..153 remapped to value-2, 154..197 to value-3.
+ * Reading the member names out of the app's FFmpeg 4.4 headers is what pins
+ * the numbers; there is no 4.4 header in this build to compute them from.
+ *
+ * The three dropped members themselves have no modern value, so they, an
+ * unknown negative, and anything past the 4.4 enum all become
+ * AV_PIX_FMT_NONE -- sws_getContext() then fails instead of scaling with a
+ * format that means something else.
+ *
+ * Consequence if this is wrong: AV_PIX_FMT_P010LE (legacy 161) was read as
+ * AV_PIX_FMT_GBRAP12LE, so P010/HEVC thumbnails rendered garbage or crashed
+ * while 8-bit sources (NV12 23, YUV420P 0, both unchanged) stayed correct.
+ */
+enum {
+    NPA_LEGACY_PIXFMT_VAAPI_MOCO = 44, /* dropped in modern FFmpeg */
+    NPA_LEGACY_PIXFMT_VAAPI_IDCT = 45, /* dropped in modern FFmpeg */
+    NPA_LEGACY_PIXFMT_VAAPI = 46,      /* first value after the dropped pair */
+    NPA_LEGACY_PIXFMT_XVMC = 153,      /* dropped in modern FFmpeg */
+    NPA_LEGACY_PIXFMT_NB = 198,        /* one past the last 4.4 format */
+    NPA_LEGACY_DROPPED_BEFORE_VAAPI = 2,
+    NPA_LEGACY_DROPPED_BEFORE_XVMC = 3
+};
+
+static enum AVPixelFormat npa_modern_pixfmt(int legacy)
+{
+    if (legacy == NPA_LEGACY_PIXFMT_VAAPI_MOCO
+        || legacy == NPA_LEGACY_PIXFMT_VAAPI_IDCT
+        || legacy == NPA_LEGACY_PIXFMT_XVMC) {
+        return AV_PIX_FMT_NONE;
+    }
+    if (legacy < 0) {
+        return AV_PIX_FMT_NONE;
+    }
+    if (legacy < NPA_LEGACY_PIXFMT_VAAPI) {
+        return (enum AVPixelFormat)legacy;
+    }
+    if (legacy <= NPA_LEGACY_PIXFMT_XVMC) {
+        return (enum AVPixelFormat)(legacy - NPA_LEGACY_DROPPED_BEFORE_VAAPI);
+    }
+    if (legacy < NPA_LEGACY_PIXFMT_NB) {
+        return (enum AVPixelFormat)(legacy - NPA_LEGACY_DROPPED_BEFORE_XVMC);
+    }
+    return AV_PIX_FMT_NONE;
+}
+
 NPA_EXPORT SwsContext *npa_sws_alloc_context(void)
 {
     return sws_alloc_context();
@@ -29,10 +95,10 @@ NPA_EXPORT SwsContext *npa_sws_alloc_context(void)
 NPA_EXPORT SwsContext *npa_sws_getContext(
     int srcW,
     int srcH,
-    enum AVPixelFormat srcFormat,
+    int srcFormat,
     int dstW,
     int dstH,
-    enum AVPixelFormat dstFormat,
+    int dstFormat,
     int flags,
     SwsFilter *srcFilter,
     SwsFilter *dstFilter,
@@ -40,7 +106,16 @@ NPA_EXPORT SwsContext *npa_sws_getContext(
 )
 {
     return sws_getContext(
-        srcW, srcH, srcFormat, dstW, dstH, dstFormat, flags, srcFilter, dstFilter, param
+        srcW,
+        srcH,
+        npa_modern_pixfmt(srcFormat),
+        dstW,
+        dstH,
+        npa_modern_pixfmt(dstFormat),
+        flags,
+        srcFilter,
+        dstFilter,
+        param
     );
 }
 
@@ -48,10 +123,10 @@ NPA_EXPORT SwsContext *npa_sws_getCachedContext(
     SwsContext *context,
     int srcW,
     int srcH,
-    enum AVPixelFormat srcFormat,
+    int srcFormat,
     int dstW,
     int dstH,
-    enum AVPixelFormat dstFormat,
+    int dstFormat,
     int flags,
     SwsFilter *srcFilter,
     SwsFilter *dstFilter,
@@ -62,10 +137,10 @@ NPA_EXPORT SwsContext *npa_sws_getCachedContext(
         context,
         srcW,
         srcH,
-        srcFormat,
+        npa_modern_pixfmt(srcFormat),
         dstW,
         dstH,
-        dstFormat,
+        npa_modern_pixfmt(dstFormat),
         flags,
         srcFilter,
         dstFilter,
