@@ -4,7 +4,14 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 from npabridge.manifest import load_manifest
-from npabridge.payload import Payload, PayloadLayout, assemble_payload, measure_payload
+from npabridge.payload import (
+    Payload,
+    PayloadLayout,
+    _BASENAME_SCAN_SIZE,
+    _RESOLVE_DLADDR_CHECK,
+    assemble_payload,
+    measure_payload,
+)
 from npabridge.target_abi import TargetABI
 
 
@@ -178,6 +185,33 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(payload.data, b"data")
         self.assertEqual(payload.symbols, {})
         self.assertEqual(payload.stubs, {})
+
+    def test_resolve_check_treats_dladdr_success_as_success(self):
+        """dladdr returns non-zero on success; a zero result is the fallback."""
+
+        publish_old = self.payload.symbols["publish_old"]
+        for api in MANIFEST.apis:
+            with self.subTest(symbol=api.symbol):
+                resolve = self.payload.symbols[f"resolve_{api.symbol}"]
+                offset = resolve - self.layout.text_vmaddr + _RESOLVE_DLADDR_CHECK
+                word = struct.unpack_from("<I", self.payload.text, offset)[0]
+                self.assertEqual(word & 0xFF00001F, 0x34000000)  # cbz w0
+                displacement = (word >> 5) & 0x7FFFF
+                if displacement & (1 << 18):
+                    displacement -= 1 << 19
+                self.assertEqual(
+                    resolve + _RESOLVE_DLADDR_CHECK + (displacement << 2),
+                    publish_old,
+                )
+
+    def test_basename_scan_reads_the_whole_path(self):
+        """The scan must reach the NUL, not stop at the first slash."""
+
+        for api in MANIFEST.apis:
+            with self.subTest(symbol=api.symbol):
+                scan = self.payload.symbols[f"basename_scan_{api.symbol}"]
+                suffix = self.payload.symbols[f"basename_suffix_{api.symbol}"]
+                self.assertEqual(suffix - scan, _BASENAME_SCAN_SIZE)
 
 
 if __name__ == "__main__":

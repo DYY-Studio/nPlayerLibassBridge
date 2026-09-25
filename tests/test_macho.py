@@ -40,7 +40,7 @@ class MachOTests(unittest.TestCase):
 
     def test_phase_a_freezes_the_payload_segments(self):
         report = self.phase_a_report
-        self.assertEqual(report["reserved_text"], 7296)
+        self.assertEqual(report["reserved_text"], 7536)
         self.assertEqual(report["dylib_ordinals"][-1][0], MANIFEST.bridge_path)
         after = parse(self.layout)
         text = after.get_segment(SEGMENT_TEXT)

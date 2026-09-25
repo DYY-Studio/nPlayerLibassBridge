@@ -77,13 +77,23 @@ ABI). That work needs the binary analyzed; see `dev/README.md`.
 
 ## Verification status
 
-The patched artifact was verified on a device (iPhone SE 3rd generation, iOS
-17.7.2, installed through LiveContainer 3.7.2): the dispatch reaches the new
-library, SRT and embedded ASS subtitles render, Matroska embedded fonts and the
-font cache work, and continuous playback stays correct. The standalone bridge
-smoke app ends with `SMOKE: PASS`. `dev/acceptance.json` records the details and
+> [!Warning]
+> Every result recorded before 2026-09-26 was produced with a dispatch payload
+> that never activated: a successful `dladdr` was read as a failure and the
+> basename scan stopped at the first slash, so the unit stayed on the app's own
+> library. Those entries are void; see the `invalidated` section of
+> `dev/acceptance.json`.
+
+The dispatch fix (2026-09-26) makes the resolve block treat a `dladdr` success
+as a success and compare the final path component of `dli_fname`. It is
+verified under PlayCover on a Mac: with the fixed payload the unit state word
+reads `NEW` and the `\kt` probe shows libass 0.17 behaviour (`\kt` only exists
+from 0.17.0), where the bundled 0.13.7 ignores it. The standalone bridge smoke
+app ends with `SMOKE: PASS`. `dev/acceptance.json` records the details and
 `dev/plans/` holds the reverse-engineering plan behind the addresses.
 Rendering differs pixel-wise from libass 0.13, which is expected.
+
+The iOS-device gate for the fixed artifact is still open.
 
 ## Troubleshooting
 

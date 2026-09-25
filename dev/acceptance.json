@@ -4,6 +4,10 @@
     "os": "iOS 17.7.2",
     "install": "LiveContainer 3.7.2 Stable"
   },
+  "invalidated": [
+    "Every result recorded before 2026-09-26 was produced with a dispatch payload that never activated: the dladdr result check was inverted (success was treated as failure) and the basename scan stopped at the first slash, so the unit state stayed OLD and the app always rendered through its bundled libass 0.13.7. Any 'state NEW' below was an assumption, never a runtime measurement -- the only device evidence was that subtitles rendered, which the silent fallback satisfies as well.",
+    "The packaged-main SHA-256 values those entries quote (19d3447...) belong to the broken payload and no longer reproduce. They are kept below only as history."
+  ],
   "results": [
     {
       "variant": "baseline",
@@ -16,20 +20,21 @@
       "variant": "weak-load-only",
       "result": "pass",
       "notes": [
-        "starts and behaves like the baseline with zero redirected calls"
+        "starts and behaves like the baseline with zero redirected calls; still valid, this is the shape the app actually ran in every pre-fix entry"
       ]
     },
     {
       "variant": "fallback",
       "result": "pass",
       "notes": [
-        "OLD path, no regression; both NOP behaviours intact"
+        "OLD path, no regression; both NOP behaviours intact; still valid, and it is what the 'bridge' entry below was unknowingly measuring"
       ]
     },
     {
       "variant": "bridge",
-      "result": "pass",
+      "result": "invalid",
       "notes": [
+        "INVALID: the payload never activated (the unit state was OLD, not NEW); see the invalidated section",
         "state NEW; SRT, embedded ASS, Matroska embedded fonts and font cache all normal",
         "continuous playback normal, including the subtitle track update path"
       ]
@@ -38,7 +43,19 @@
       "variant": "smoke",
       "result": "pass",
       "notes": [
-        "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown"
+        "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown; this links the dylib directly, so it never exercised the dispatch and is unaffected by the bug"
+      ]
+    },
+    {
+      "variant": "dispatch-fix",
+      "result": "pass",
+      "notes": [
+        "root cause: `npabridge/payload.py` emitted the dladdr result check as `cbnz w0, publish_old`, but dladdr reports success with a non-zero result, so a successful lookup was treated as a failure; the basename scan also stopped at the first '/', so an absolute dli_fname could never match its basename. Both were present since the first payload commit b146213",
+        "fix: test the dladdr result with CBZ and compare the final path component (the scan reaches the NUL, then steps back over the basename and requires the preceding byte to be '/'). `npabridge.payload` now asserts both shapes on every assembly",
+        "runtime proof: macOS PlayCover, iPhone-SE-class app, installed bundle carrying the fixed payload. Before the fix the libass unit state word read 3 (OLD) while LibASSBridge.dylib was loaded and dlsym returned its symbol; after the fix the unit state word reads 2 (NEW) and every slot holds a bridge address",
+        "libass 0.17.5 behaviour confirmed visually: the \\kt probe renders the 0.17 karaoke behaviour (libass only added the \\kt override tag in 0.17.0), where the bundled 0.13.7 ignores it",
+        "new packaged-main anchor: e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe; the full suite (48 tests, 63 subtests) passes",
+        "this is a PlayCover run, not yet an iOS-device re-acceptance; the device gate for the fixed artifact is still open"
       ]
     }
   ]

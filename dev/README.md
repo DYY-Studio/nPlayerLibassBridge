@@ -41,9 +41,10 @@ the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
 3. Append the device, iOS version, install method and both results to
    `acceptance.json`.
 
-The expected packaged main hash is
-`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887`
-(unsigned intermediate: `4bb9f5670062c2a7eee5797a02ccb066abdc68a3610f5b01037e123e862a79f3`).
+The expected packaged main hash after the 2026-09-26 dispatch fix is
+`e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`. The pre-fix
+value `19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` is void:
+that payload never activated the bridge (see `acceptance.json`).
 
 ## Release checklist
 

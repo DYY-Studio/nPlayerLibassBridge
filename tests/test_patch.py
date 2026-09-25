@@ -17,7 +17,7 @@ from support import ROOT, SOURCE_IPA
 MANIFESTS = ROOT / "manifests"
 BRIDGE = ROOT / "build" / "LibASSBridge.dylib"
 # the main member of the device-accepted bridge.ipa, signed under the name nPlayer
-PACKAGED_MAIN_SHA256 = "19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887"
+PACKAGED_MAIN_SHA256 = "e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe"
 
 
 class PatchFlowTests(unittest.TestCase):
