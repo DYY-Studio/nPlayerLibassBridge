@@ -58,23 +58,23 @@
     },
     {
       "variant": "ffmpeg-multiunit",
-      "result": "pending device re-run",
+      "result": "pass",
       "notes": [
         "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
         "packaged main sha256 fb6013cad491a3548cf55386268f80cdbd794e8ea8cba6ed66b462a595799d55",
         "the changed-instruction check is exact: only this unit's 20 call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
         "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
-        "TODO: **prioritise the scaling path** (aspect-fit / resolution mismatch / pixel-format conversion) because that is exactly the branch the security fix affects; then screenshot/thumbnail, playback speed change and audio"
+        "user re-ran this artifact on the device after the sws_alloc_context fix and reported no visible problems with normal operation (playback, scaling, snapshot, speed change, audio)"
       ]
     },
     {
       "variant": "multiunit-both",
-      "result": "pending device re-run",
+      "result": "pass",
       "notes": [
         "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
         "packaged main sha256 24c940a6111fda140ce382db9ce49b5a37f8e9c94f746a3eb03da9bf8d91b2a7; both dylibs present exactly once",
         "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
-        "TODO: one session covering subtitles, scaling, snapshot and audio"
+        "user re-ran this artifact on the device after the sws_alloc_context fix and reported no visible problems with normal operation (playback, scaling, snapshot, speed change, audio)"
       ]
     }
   ]
