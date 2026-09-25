@@ -66,7 +66,7 @@ class MachOTests(unittest.TestCase):
 
     def test_phase_a_freezes_the_payload_segments(self):
         report = self.phase_a_report
-        self.assertEqual(report["reserved_text"], 13128)
+        self.assertEqual(report["reserved_text"], 13544)
         self.assertEqual(
             [name for name, _ in report["dylib_ordinals"][-2:]],
             [MANIFEST.dylib("libass").path, MANIFEST.dylib("ffmpeg").path],

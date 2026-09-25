@@ -4,8 +4,12 @@
     "os": "iOS 17.7.2",
     "install": "LiveContainer 3.7.2 Stable"
   },
+  "invalidated": [
+    "Every result recorded before 2026-09-26 was produced with a dispatch payload that never activated: the dladdr result check was inverted (success was treated as failure) and the basename scan stopped at the first slash, so each unit state stayed OLD and the app always rendered through its bundled libass 0.13.7. Any 'state NEW' in those notes was an assumption, never a runtime measurement -- the only device evidence was that subtitles rendered, which the silent fallback satisfies as well.",
+    "The packaged-main SHA-256 values those entries quote (19d3447..., fb6013ca..., 24c940a6...) belong to the broken payload and no longer reproduce. They are kept below only as history."
+  ],
   "reproducibility": [
-    "the patched main for a given dylib selection is byte-stable: `--dylib libass` still produces main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, the value of the already accepted artifact, and the whole payload text region is byte-identical to it",
+    "the patched main for a given dylib selection is byte-stable. After the 2026-09-26 dispatch fix the anchors are: `--dylib libass` -> e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe, libass + ffmpeg -> 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810",
     "the bridge dylibs themselves are NOT byte-reproducible: `make deps` rebuilds the static closures from scratch and the resulting archives (and therefore the linked dylibs) differ on every run. The contract for a shipped dylib is its verification report (exports, install name, dependencies, no initializers, no host paths), not a hash",
     "the IPA sha256 is not a stable anchor: the zip records file mtimes, so re-patching the same input yields a different artifact digest while packaged_main_sha256 and the dylib hashes stay the same. Use packaged_main_sha256 for regression anchors."
   ],
@@ -21,20 +25,21 @@
       "variant": "weak-load-only",
       "result": "pass",
       "notes": [
-        "starts and behaves like the baseline with zero redirected calls"
+        "starts and behaves like the baseline with zero redirected calls; still valid, this is the shape the app actually ran in every pre-fix entry"
       ]
     },
     {
       "variant": "fallback",
       "result": "pass",
       "notes": [
-        "OLD path, no regression; both NOP behaviours intact"
+        "OLD path, no regression; both NOP behaviours intact; still valid, and it is what the 'bridge' entry below was unknowingly measuring"
       ]
     },
     {
       "variant": "bridge",
-      "result": "pass",
+      "result": "invalid",
       "notes": [
+        "INVALID: the payload never activated (the unit state was OLD, not NEW); see the invalidated section",
         "state NEW; SRT, embedded ASS, Matroska embedded fonts and font cache all normal",
         "continuous playback normal, including the subtitle track update path"
       ]
@@ -43,13 +48,14 @@
       "variant": "smoke",
       "result": "pass",
       "notes": [
-        "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown"
+        "SMOKE: PASS, non-empty ASS_Image list, clean app-compatible teardown; this links the dylib directly, so it never exercised the dispatch and is unaffected by the bug"
       ]
     },
     {
       "variant": "libass-multiunit",
-      "result": "pass",
+      "result": "invalid",
       "notes": [
+        "INVALID: same silent fallback as `bridge`; the 21 static checks passed but none of them observed the runtime state",
         "clean IPA re-patched after the multi-dylib refactor with `npa-patch --dylib libass`; 21 static checks pass",
         "packaged main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. identical to the accepted `bridge` variant; the payload text region matches byte for byte",
         "device: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback all normal, with the rebuilt LibASSBridge.dylib",
@@ -58,8 +64,9 @@
     },
     {
       "variant": "ffmpeg-multiunit",
-      "result": "pass",
+      "result": "invalid",
       "notes": [
+        "INVALID: the ffmpeg units fell back exactly like libass, so the app kept its own FFmpeg 4.4; the sws_alloc_context work below never ran",
         "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
         "packaged main sha256 fb6013cad491a3548cf55386268f80cdbd794e8ea8cba6ed66b462a595799d55",
         "the changed-instruction check is exact: only this unit's 20 call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
@@ -69,12 +76,25 @@
     },
     {
       "variant": "multiunit-both",
-      "result": "pass",
+      "result": "invalid",
       "notes": [
+        "INVALID: both units fell back; the 28 static checks passed but none of them observed the runtime state",
         "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
         "packaged main sha256 24c940a6111fda140ce382db9ce49b5a37f8e9c94f746a3eb03da9bf8d91b2a7; both dylibs present exactly once",
         "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
         "user re-ran this artifact on the device after the sws_alloc_context fix and reported no visible problems with normal operation (playback, scaling, snapshot, speed change, audio)"
+      ]
+    },
+    {
+      "variant": "dispatch-fix",
+      "result": "pass",
+      "notes": [
+        "root cause: `npabridge/payload.py` emitted the dladdr result check as `cbnz w0, publish_old`, but dladdr reports success with a non-zero result, so a successful lookup was treated as a failure; the basename scan also stopped at the first '/', so an absolute dli_fname could never match its basename. Both were present since the first payload commit b146213, so the dispatch had never activated",
+        "fix: test the dladdr result with CBZ and compare the final path component (the scan reaches the NUL, then steps back over the basename and requires the preceding byte to be '/'). `npabridge.payload` now asserts both shapes on every assembly",
+        "runtime proof: macOS PlayCover, iPhone-SE-class app, installed bundle carrying the fixed payload. Before the fix the libass unit state word read 3 (OLD) while LibASSBridge.dylib was loaded and dlsym returned its symbol; after the fix the three unit state words read 2 (NEW) and every slot holds a bridge address",
+        "libass 0.17.5 behaviour confirmed visually: the \\kt probe renders the 0.17 karaoke behaviour (libass only added the \\kt override tag in 0.17.0), where the bundled 0.13.7 ignores it",
+        "new packaged-main anchors: libass e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe, libass + ffmpeg 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810; the full suite (71 tests, 168 subtests) passes",
+        "this is a PlayCover run, not yet an iOS-device re-acceptance; the device gate for the fixed artifacts is still open"
       ]
     }
   ]

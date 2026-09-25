@@ -104,22 +104,30 @@ ABI). That work needs the binary analyzed; see `dev/README.md`.
 
 ## Verification status
 
-The libass unit was verified on a device (iPhone SE 3rd generation, iOS 17.7.2,
-installed through LiveContainer 3.7.2): the dispatch reaches the new library,
-SRT and embedded ASS subtitles render, Matroska embedded fonts and the font
-cache work, and continuous playback stays correct. The standalone bridge smoke
-app ends with `SMOKE: PASS`. `dev/acceptance.json` records the details and
+> [!Warning]
+> Every result recorded before 2026-09-26 was produced with a dispatch payload
+> that never activated: a successful `dladdr` was read as a failure and the
+> basename scan stopped at the first slash, so each unit stayed on the app's own
+> library. Those entries are void; see the `invalidated` section of
+> `dev/acceptance.json`.
+
+The dispatch fix (2026-09-26) makes the resolve block treat a `dladdr` success
+as a success and compare the final path component of `dli_fname`. It is
+verified under PlayCover on a Mac: with the fixed payload all three unit state
+words read `NEW` and the `\kt` probe shows libass 0.17 behaviour (`\kt` only
+exists from 0.17.0), where the bundled 0.13.7 ignores it. The standalone bridge
+smoke app ends with `SMOKE: PASS`. `dev/acceptance.json` records the details and
 `dev/plans/` holds the reverse-engineering plan behind the addresses.
 Rendering differs pixel-wise from libass 0.13, which is expected.
 
-The multi-unit refactor behind the FFmpeg unit replays that libass artifact: for
-the same input, the libass-only patch still produces a main whose SHA-256 is
-`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887`, the same
-value the accepted artifact has, and the whole payload text region is
-byte-identical. The FFmpeg unit has passed the static checks (all nineteen call
-sites decoded out of the clean IPA, both dylibs built and verified, the shipped
-artifact re-verified after packaging) but has **not** been device-tested yet;
-`dev/acceptance.json` marks it `pending`.
+For the same input the libass-only patch produces a main whose SHA-256 is
+`e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`, and the
+libass + FFmpeg selection
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`. The FFmpeg
+unit has passed the static checks (all nineteen call sites decoded out of the
+clean IPA, both dylibs built and verified, the shipped artifact re-verified
+after packaging) but its **runtime** path has **not** been device-tested yet.
+The iOS-device gate for the fixed artifacts is still open.
 
 ## Troubleshooting
 

@@ -29,6 +29,10 @@ _CONTINUATION_OFFSET = 72
 _FBASE_OFFSET = 80
 _CANDIDATE_OFFSET = 88
 _INFO_OFFSET = 96
+# Offset of the dladdr result check inside a resolve block; see _resolve_block.
+_RESOLVE_DLADDR_CHECK = 0x24
+# A resolve block's basename scan walks to the NUL in four instructions.
+_BASENAME_SCAN_SIZE = 0x10
 _MIN_FRAME_SIZE = 128
 _BRANCH_LIMIT = 1 << 27
 _ADR_LIMIT = 1 << 20
@@ -426,7 +430,8 @@ def _resolve_block(
                 f"  ldr x0, [sp, #{_CANDIDATE_OFFSET}]",
                 f"  add x1, sp, #{_INFO_OFFSET}",
                 _stub_branch("bl", dladdr_target),
-                _branch_register("cbnz", "w0", addresses, publish_old),
+                # dladdr reports success with a non-zero result.
+                _branch_register("cbz", "w0", addresses, publish_old),
                 f"  add x1, sp, #{_INFO_OFFSET}",
                 f"  ldr x2, [x1, #{fbase_offset}]",
                 _branch_register("cbz", "x2", addresses, publish_old),
@@ -450,9 +455,7 @@ def _resolve_block(
             (
                 f"{scan}:",
                 "  ldrb w5, [x4]",
-                _branch_register("cbz", "w5", addresses, publish_old),
-                "  cmp w5, #47",
-                _branch("b.eq", addresses, suffix),
+                _branch_register("cbz", "w5", addresses, suffix),
                 "  add x4, x4, #1",
                 _branch("b", addresses, scan),
             ),
@@ -461,7 +464,16 @@ def _resolve_block(
             suffix,
             (
                 f"{suffix}:",
-                "  add x4, x4, #1",
+                # x4 sits on the NUL. Step back over the basename so the
+                # comparison covers the final path component of any path,
+                # not just the text that follows the first slash.
+                f"  sub x4, x4, #{len(data.unit.basename)}",
+                "  cmp x4, x3",
+                _branch("b.ls", addresses, publish_old),
+                "  sub x5, x4, #1",
+                "  ldrb w5, [x5]",
+                "  cmp w5, #47",
+                _branch("b.ne", addresses, publish_old),
                 *_basename_checks(data.unit.basename, addresses, publish_old),
                 _branch("b", addresses, store),
             ),
@@ -793,6 +805,46 @@ def _validate_encoded_branches(
         raise ValueError("payload does not contain one dladdr call per API")
 
 
+def _validate_resolve_checks(
+    code: bytes,
+    layout: PayloadLayout,
+    addresses: dict[str, int],
+    units: Sequence[Unit],
+) -> None:
+    """Pin the two runtime decisions the dispatch makes about a candidate.
+
+    ``dladdr`` reports success with a non-zero result, so the check after the
+    call must fall back when it returns zero. The basename scan must reach the
+    end of the path before comparing, otherwise an absolute ``dli_fname``
+    never matches its basename and the bridge silently never activates.
+    """
+
+    for unit in units:
+        publish_old = addresses[f"publish_old_{unit.id}"]
+        for api in unit.apis:
+            resolve = addresses[f"resolve_{api.symbol}"]
+            offset = resolve - layout.text_vmaddr + _RESOLVE_DLADDR_CHECK
+            word = struct.unpack_from("<I", code, offset)[0]
+            if word & 0xFF00001F != 0x34000000:
+                raise ValueError(
+                    f"{api.symbol} does not test the dladdr result for zero"
+                )
+            displacement = (word >> 5) & 0x7FFFF
+            if displacement & (1 << 18):
+                displacement -= 1 << 19
+            target = resolve + _RESOLVE_DLADDR_CHECK + (displacement << 2)
+            if target != publish_old:
+                raise ValueError(
+                    f"{api.symbol} treats a successful dladdr as a fallback"
+                )
+            scan = addresses[f"basename_scan_{api.symbol}"]
+            suffix = addresses[f"basename_suffix_{api.symbol}"]
+            if suffix - scan != _BASENAME_SCAN_SIZE:
+                raise ValueError(
+                    f"{api.symbol} stops its basename scan at the first slash"
+                )
+
+
 def _check_external_branches(
     manifest: Manifest,
     addresses: dict[str, int],
@@ -941,6 +993,7 @@ def _build_payload(
     }
     _validate_encoded_invariants(text, cursor, len(units))
     _validate_encoded_branches(text, cursor, layout, manifest, units)
+    _validate_resolve_checks(text, layout, addresses, units)
     _validate_callsite_branches(layout, units, symbols)
     return Payload(text=bytes(text), data=data, symbols=symbols, stubs=stubs)
 
