@@ -21,6 +21,11 @@
 
 #define NPA_EXPORT __attribute__((visibility("default")))
 
+NPA_EXPORT SwsContext *npa_sws_alloc_context(void)
+{
+    return sws_alloc_context();
+}
+
 NPA_EXPORT SwsContext *npa_sws_getContext(
     int srcW,
     int srcH,

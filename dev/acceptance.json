@@ -6,7 +6,8 @@
   },
   "reproducibility": [
     "the patched main for a given dylib selection is byte-stable: `--dylib libass` still produces main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, the value of the already accepted artifact, and the whole payload text region is byte-identical to it",
-    "the bridge dylibs themselves are NOT byte-reproducible: `make deps` rebuilds the static closures from scratch and the resulting archives (and therefore the linked dylibs) differ on every run. The contract for a shipped dylib is its verification report (exports, install name, dependencies, no initializers, no host paths), not a hash"
+    "the bridge dylibs themselves are NOT byte-reproducible: `make deps` rebuilds the static closures from scratch and the resulting archives (and therefore the linked dylibs) differ on every run. The contract for a shipped dylib is its verification report (exports, install name, dependencies, no initializers, no host paths), not a hash",
+    "the IPA sha256 is not a stable anchor: the zip records file mtimes, so re-patching the same input yields a different artifact digest while packaged_main_sha256 and the dylib hashes stay the same. Use packaged_main_sha256 for regression anchors."
   ],
   "results": [
     {
@@ -51,30 +52,29 @@
       "notes": [
         "clean IPA re-patched after the multi-dylib refactor with `npa-patch --dylib libass`; 21 static checks pass",
         "packaged main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. identical to the accepted `bridge` variant; the payload text region matches byte for byte",
-        "device: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback all normal, with the rebuilt LibASSBridge.dylib"
+        "device: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback all normal, with the rebuilt LibASSBridge.dylib",
+        "regenerated after the swscale fix; packaged main is still 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. byte-identical to the device-accepted artifact, because the libass unit is untouched by the fix"
       ]
     },
     {
       "variant": "ffmpeg-multiunit",
-      "result": "pass",
+      "result": "pending device re-run",
       "notes": [
         "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
-        "packaged main sha256 53748f92f83077f105d719a68ad027bc96786693182422716081055e24656754",
-        "the changed-instruction check is exact: only the 19 ffmpeg call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
-        "device: snapshot/thumbnail images render, playback scaling is correct, playback speed change works, audio is correct by ear (pitch and duration), no crash across start/stop and speed changes",
-        "this run is the first device exercise of the swr_free entry point, so the audio teardown and reconfigure paths are covered by real playback",
-        "the two audio teardown/reconfigure sites (0x100ABFA38, 0x100ABFB34) call FFmpeg 4.4 swr_free (they pass the address of the context field), so the bridge entry point is npa_swr_free(struct SwrContext **); an earlier mapping to swr_close would have written through the context pointer and corrupted the resampler object. Re-verified against nPlayer.i64 by re-decompiling 0x10112DBE0 (frees *arg via av_freep) versus the real swr_close thunk at 0x10112DC24 (branch to clear_context, called only from the Opus path)",
-        "npa_swr_alloc_set_opts keeps 4.4's soft failure: a zero channel-layout mask leaves the layout unset so the error surfaces at swr_init as EINVAL, instead of returning NULL to a caller that does not check it",
-        "unit isolation is not separately measured on device; the static substitutes are: every unit owns its own state word and slot table (states all 0 in the patched main), each unit's machine code only accepts its own basename, and each unit publishes independently, so a failed unit lands on OLD while the others stay NEW"
+        "packaged main sha256 fb6013cad491a3548cf55386268f80cdbd794e8ea8cba6ed66b462a595799d55",
+        "the changed-instruction check is exact: only this unit's 20 call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
+        "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
+        "TODO: **prioritise the scaling path** (aspect-fit / resolution mismatch / pixel-format conversion) because that is exactly the branch the security fix affects; then screenshot/thumbnail, playback speed change and audio"
       ]
     },
     {
       "variant": "multiunit-both",
-      "result": "pass",
+      "result": "pending device re-run",
       "notes": [
         "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
-        "packaged main sha256 d3793f82ec079723a3b3d057057b4bc9ef1597ab7f9340260e786d9f5ac9fe64; both dylibs are present exactly once",
-        "device: subtitles, snapshot and audio all normal in one session, with both dylibs loaded"
+        "packaged main sha256 24c940a6111fda140ce382db9ce49b5a37f8e9c94f746a3eb03da9bf8d91b2a7; both dylibs present exactly once",
+        "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
+        "TODO: one session covering subtitles, scaling, snapshot and audio"
       ]
     }
   ]

@@ -33,6 +33,7 @@ EXPECTED_LIBASS_SYMBOLS = tuple(
     for api in domain.apis
 )
 EXPECTED_FFMPEG_SYMBOLS = (
+    "npa_sws_alloc_context",
     "npa_sws_getContext",
     "npa_sws_getCachedContext",
     "npa_sws_scale",
@@ -78,7 +79,7 @@ class BridgeTests(unittest.TestCase):
                     with self.subTest(symbol=api.symbol):
                         self.assertFalse(api.symbol.startswith("_"))
 
-    def test_ffmpeg_dylib_exports_exactly_ten_symbols(self):
+    def test_ffmpeg_dylib_exports_exactly_the_expected_symbols(self):
         if not FFMPEG.is_file():
             self.skipTest("LibFFmpegBridge.dylib is not built")
         self.assertEqual(

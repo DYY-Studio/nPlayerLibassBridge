@@ -94,11 +94,12 @@ class ManifestTests(unittest.TestCase):
             self.manifest.units(("ffmpeg",))[0],
             self.manifest.units(("ffmpeg",))[1],
         )
-        self.assertEqual((swscale.symbol_count, swscale.call_site_count), (4, 12))
+        self.assertEqual((swscale.symbol_count, swscale.call_site_count), (5, 13))
         self.assertEqual((swresample.symbol_count, swresample.call_site_count), (6, 7))
         self.assertEqual(
             {api.symbol for api in swscale.apis},
             {
+                "npa_sws_alloc_context",
                 "npa_sws_getContext",
                 "npa_sws_getCachedContext",
                 "npa_sws_scale",

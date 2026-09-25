@@ -144,6 +144,11 @@
           "id": "libswscale",
           "apis": [
             {
+              "symbol": "npa_sws_alloc_context",
+              "call_sites": ["0x100A31B18"],
+              "old_target": "0x1008DDE60"
+            },
+            {
               "symbol": "npa_sws_getContext",
               "call_sites": ["0x100A23428", "0x100A46A90", "0x100A8A4A4"],
               "old_target": "0x1008DDD8C"

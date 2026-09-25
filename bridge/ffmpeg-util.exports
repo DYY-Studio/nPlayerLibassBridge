@@ -1,3 +1,4 @@
+_npa_sws_alloc_context
 _npa_sws_getContext
 _npa_sws_getCachedContext
 _npa_sws_scale
