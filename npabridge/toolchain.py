@@ -3,25 +3,44 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 from pathlib import Path
 
 
 # The host assembler is a build product / release asset, not a Python package:
-# `make bootstrap` writes it here, and release users drop the pinned asset here.
-DEFAULT_LIBRARY = Path(__file__).resolve().parents[1] / "libkeystone.dylib"
+# `make bootstrap` writes it next to the package, and release users drop the
+# pinned asset there. Its name is the host's shared-library name, so the macOS
+# and Linux builds are told apart by the platform, never guessed.
+LIBRARY_NAMES = {
+    "darwin": "libkeystone.dylib",
+    "linux": "libkeystone.so",
+}
 ARCH_ARM64 = 2
 MODE_LITTLE_ENDIAN = 0
 SUPPORTED_VERSION = (0, 9)
 
 
+def default_library(platform: str | None = None) -> Path:
+    """Where this platform keeps the host assembler, or a loud failure."""
+
+    host = sys.platform if platform is None else platform
+    name = LIBRARY_NAMES.get(host)
+    if name is None:
+        raise RuntimeError(
+            f"unsupported host platform for the Keystone assembler: {host}\n"
+            f"  expected one of: {', '.join(sorted(LIBRARY_NAMES))}"
+        )
+    return Path(__file__).resolve().parents[1] / name
+
+
 class Toolchain:
     def __init__(self, library_path: str | Path | None = None) -> None:
-        selected = DEFAULT_LIBRARY if library_path is None else Path(library_path)
+        selected = default_library() if library_path is None else Path(library_path)
         if not selected.is_file():
             raise FileNotFoundError(
                 f"host assembler library is missing: {selected}\n"
-                "  run `make bootstrap`, or copy libkeystone.dylib from the release "
-                "assets next to the package (the patch flow runs from a repository checkout)"
+                "  run `make bootstrap` to build it, or place the release asset "
+                "next to the package (the patch flow runs from a repository checkout)"
             )
         self.library_path = selected.resolve()
         self._library = ctypes.CDLL(str(self.library_path))

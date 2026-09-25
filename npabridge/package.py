@@ -23,7 +23,7 @@ MAIN_MEMBER = (APP_DIR / "nPlayer").as_posix()
 BRIDGE_MEMBER = (APP_DIR / "Frameworks" / "LibASSBridge.dylib").as_posix()
 LINKEDIT = "ldid"
 TOOL_HINTS = {
-    "ldid": "brew install ldid on macOS, or your distribution's ldid build",
+    "ldid": "brew install ldid on macOS; on Linux use a prebuilt ldid binary",
     "zip": "macOS ships /usr/bin/zip; on Linux install zip",
     "unzip": "macOS ships /usr/bin/unzip; on Linux install unzip",
 }

@@ -17,6 +17,7 @@ htmlcov/
 
 # Release assets and local tool state (host assembler, bridge dylib)
 /libkeystone.dylib
+/libkeystone.so*
 /LibASSBridge.dylib
 
 # Local tool and scratch state

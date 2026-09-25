@@ -31,16 +31,17 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 
 ## Requirements
 
-- macOS or Linux, Python ≥ 3.11, [uv](https://docs.astral.sh/uv/), `ldid`
-  (`brew install ldid`; on Linux use your distribution's ldid build), `zip` and
-  `unzip`.
+- macOS or Linux, Python ≥ 3.11, [uv](https://docs.astral.sh/uv/), `ldid`, `zip`
+  and `unzip`. Install ldid with `brew install ldid` on macOS; on Linux it is
+  not always packaged (Ubuntu 24.04 does not ship it), so use a
+  [prebuilt binary](https://github.com/ProcursusTeam/ldid/releases) or build it.
 - Your own **decrypted** nPlayer 3.13.0 IPA. App Store packages are
   FairPlay-encrypted and are rejected on purpose; this project ships no IPA and
   no decryption.
 - Two host files from the release assets: `LibASSBridge.dylib` (libass 0.17.5
   for iOS arm64) and `libkeystone.dylib` (the arm64 assembler used to encode the
-  dispatch payload). Both are host-side build products; `make bootstrap` builds
-  the assembler locally if you prefer that.
+  dispatch payload, macOS arm64 only). Both are host-side build products; on
+  Linux, `make bootstrap` builds the assembler as `libkeystone.so` instead.
 - No Xcode, no iOS SDK, no jailbreak. `npa-patch` runs from the repository
   checkout, next to `manifests/`.
 
@@ -49,6 +50,7 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 ```sh
 git clone <this repository> && cd nplayer-libass-bridge
 # put LibASSBridge.dylib and libkeystone.dylib from the release assets here
+# (on Linux, run `make bootstrap` to build libkeystone.so instead)
 uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
@@ -90,8 +92,8 @@ Rendering differs pixel-wise from libass 0.13, which is expected.
 | `still FairPlay-encrypted` | the IPA comes straight from the App Store | provide a decrypted dump of your own purchase |
 | `no manifest matches this main executable` | wrong nPlayer version, or the IPA already has the patch | use a supported, clean dump |
 | `bridge.exports` / `bridge.install_name` failed | wrong or stale dylib | use the `LibASSBridge.dylib` from the matching release |
-| `ldid is required to assemble the IPA` | ldid is not installed | `brew install ldid` |
-| `host assembler library is missing` | `libkeystone.dylib` is not in the checkout | download it from the release assets, or run `make bootstrap` |
+| `ldid is required to assemble the IPA` | ldid is not installed | `brew install ldid`, or a prebuilt Linux ldid |
+| `host assembler library is missing` | the host assembler is not in the checkout | run `make bootstrap`, or drop the `libkeystone.dylib` release asset on macOS |
 
 ## Rebuilding from source
 

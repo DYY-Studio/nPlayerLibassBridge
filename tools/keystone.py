@@ -17,13 +17,21 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
+
+from npabridge.toolchain import default_library  # noqa: E402
+
+
 COMMIT = "dc7932ef2b2c4a793836caec6ecab485005139d6"
 ARCHIVE_URL = f"https://codeload.github.com/keystone-engine/keystone/tar.gz/{COMMIT}"
 SOURCES = ROOT / "build" / "sources"
 ARCHIVE = SOURCES / f"keystone-{COMMIT[:8]}.tar.gz"
 SOURCE = SOURCES / f"keystone-{COMMIT}"
 BUILD_DIR = ROOT / "build" / "keystone-build"
-OUTPUT = ROOT / "libkeystone.dylib"
+# The assembler is loaded by npabridge.toolchain, so both sides derive its name
+# from the same table: `make bootstrap` writes exactly what the patch flow loads.
+OUTPUT = default_library()
 POLICY_OLD = "cmake_policy(SET CMP0051 OLD)"
 POLICY_NEW = "cmake_policy(SET CMP0051 NEW)"
 POLICY_FILES = ("CMakeLists.txt", "llvm/CMakeLists.txt")
@@ -35,7 +43,11 @@ CONFIGURE_OPTIONS = (
     "-DBUILD_SHARED_LIBS=ON",
     "-DBUILD_LIBS_ONLY=ON",
     "-DLLVM_TARGETS_TO_BUILD=AArch64",
-    "-DCMAKE_OSX_ARCHITECTURES=arm64",
+) + (
+    # Only Apple's CMake knows this variable; elsewhere the host ABI decides.
+    ("-DCMAKE_OSX_ARCHITECTURES=arm64",)
+    if sys.platform == "darwin"
+    else ()
 )
 
 
@@ -74,14 +86,25 @@ def apply_cmake_policy(source: Path) -> None:
         path.write_text(text.replace(POLICY_OLD, POLICY_NEW), encoding="utf-8")
 
 
+def _built_library(build_dir: Path, suffix: str) -> Path:
+    """The shared library CMake just wrote, named for this host."""
+
+    matches = sorted(
+        path
+        for path in (build_dir / "llvm" / "lib").glob(f"libkeystone{suffix}*")
+        if path.is_file() and not path.is_symlink()
+    )
+    if not matches:
+        raise RuntimeError(f"CMake did not produce a Keystone library in {build_dir}")
+    return matches[0]
+
+
 def build(source: Path, build_dir: Path = BUILD_DIR, output: Path = OUTPUT) -> Path:
     if build_dir.exists():
         shutil.rmtree(build_dir)
     _run(["cmake", "-S", source, "-B", build_dir, *CONFIGURE_OPTIONS])
     _run(["cmake", "--build", build_dir])
-    built = build_dir / "llvm" / "lib" / "libkeystone.dylib"
-    if not built.is_file():
-        raise RuntimeError(f"CMake did not produce a Keystone library in {build_dir}")
+    built = _built_library(build_dir, output.suffix)
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(built, output)
     return output
