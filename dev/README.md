@@ -41,10 +41,12 @@ the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
 3. Append the device, iOS version, install method and both results to
    `acceptance.json`.
 
-The expected packaged main hashes after the 2026-09-26 dispatch fix are
+The expected packaged main hashes after the 2026-09-26 fixes are
 `e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe` for
-`--dylib libass` and `3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`
-for the default selection. The pre-fix value
+`--dylib libass`, `a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`
+for `--dylib ffmpeg` and
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810` for the
+default selection. The pre-fix value
 `19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` is void: that
 payload never activated the bridge (see `acceptance.json`).
 

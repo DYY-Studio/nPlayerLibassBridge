@@ -112,22 +112,33 @@ ABI). That work needs the binary analyzed; see `dev/README.md`.
 > `dev/acceptance.json`.
 
 The dispatch fix (2026-09-26) makes the resolve block treat a `dladdr` success
-as a success and compare the final path component of `dli_fname`. It is
-verified under PlayCover on a Mac: with the fixed payload all three unit state
-words read `NEW` and the `\kt` probe shows libass 0.17 behaviour (`\kt` only
-exists from 0.17.0), where the bundled 0.13.7 ignores it. The standalone bridge
-smoke app ends with `SMOKE: PASS`. `dev/acceptance.json` records the details and
-`dev/plans/` holds the reverse-engineering plan behind the addresses.
-Rendering differs pixel-wise from libass 0.13, which is expected.
+as a success and compare the final path component of `dli_fname`. Both units are
+now verified on a device (iPhone SE 3rd generation, iOS 17.7.2, LiveContainer
+3.7.2): with the fixed payload every unit state word reads `NEW` and the `\kt`
+probe renders libass 0.17 behaviour (`\kt` only exists from 0.17.0), where the
+bundled 0.13.7 ignores it. The standalone bridge smoke app ends with
+`SMOKE: PASS`. `dev/acceptance.json` records the details and `dev/plans/` holds
+the reverse-engineering plan behind the addresses. Rendering differs pixel-wise
+from libass 0.13, which is expected.
+
+The FFmpeg unit needed one more fix before it worked. The app's FFmpeg 4.4
+numbers three `AVPixelFormat` members that 9.0.2 removed, and because they sit
+inside the enum every later value moved, so the scaler read `AV_PIX_FMT_P010LE`
+as `AV_PIX_FMT_GBRAP12LE` and P010/HEVC thumbnails either crashed (iOS) or
+rendered garbage (macOS, lower half green). The swscale shims now translate the
+legacy format before forwarding (commit `05423b2`). On the device P010/HEVC
+thumbnails, playback, H.264/AVC and audio are all normal. HDR tone mapping
+differs slightly, which is expected: the app never calls
+`sws_setColorspaceDetails` and routes its Color Space setting only to the
+display layer, so HDR conversion uses swscale 9.0.2's own defaults instead of
+4.4.5's.
 
 For the same input the libass-only patch produces a main whose SHA-256 is
-`e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`, and the
-libass + FFmpeg selection
-`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`. The FFmpeg
-unit has passed the static checks (all nineteen call sites decoded out of the
-clean IPA, both dylibs built and verified, the shipped artifact re-verified
-after packaging) but its **runtime** path has **not** been device-tested yet.
-The iOS-device gate for the fixed artifacts is still open.
+`e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`, the
+FFmpeg-only patch
+`a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`, and the
+default selection
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`.
 
 ## Troubleshooting
 
