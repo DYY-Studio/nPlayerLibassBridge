@@ -207,8 +207,10 @@ carry the units.
 The whole-4.4.8 dylib carries the `ffmpeg-core` code and the scaler/resampler of
 the same closure, so it inherits every core result below; the new part is that
 `sws_*`/`swr_*` now run on 4.4.8 instead of 9.0.2, which is what removes the
-legacy `AVPixelFormat` translation the 9.0.2 shim needed for P010/HEVC. It has
-not had a device pass of its own yet.
+legacy `AVPixelFormat` translation the 9.0.2 shim needed for P010/HEVC. On the
+device that row passes on this dylib - it shows the path needs no translation at
+all, rather than that a translation is correct. The rest of the matrix has not
+been re-run on it.
 
 The `ffmpeg-core` unit is live on the same artifacts. Its code paths were
 demonstrably running when they failed - the P010/HEVC crash and the https failure
@@ -217,9 +219,16 @@ selection passes https HLS, P010/HEVC on the hardware and the software decode
 path, AV1 software decode through libdav1d, audio, the containers mkv/webm, mp4,
 mpeg, ts and wmv, software decode of mpeg1/vp8/wmv3, continuous playback, seek,
 thumbnails and speed change; the subtitle matrix, with the `\kt` probe, shows the
-libass unit itself live in the same run. What remains open is the recording/mux
-path, rtmps/rtsp and the whole-unit fallback proof; `dev/acceptance.json` records
-the artifact and the full list.
+libass unit itself live in the same run. SPDIF passthrough, rtmps and rtsp
+cannot be corroborated here - no passthrough-capable output chain and no such
+servers - so they are recorded as unavailable rather than failed or unmeasured;
+the whole-unit fallback is proven (with the selected dylib removed, every unit it
+carries reads `OLD` while the other dylib keeps its own `NEW`), and the mux/encode
+surface does have user entries -
+AirPlay and Chromecast start an HLS transcode/mux session for a local non-mp4
+source, the digital-audio passthrough setting drives the SPDIF muxer, and MJPEG
+cover encoding runs for the browser and info panels - and AirPlay playback passes
+on the device. `dev/acceptance.json` records the artifact and the full list.
 
 ## Troubleshooting
 

@@ -43,7 +43,35 @@ the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
    matrix in `plans/2026-09-24-libass-bridge-prototype.md` (Task 11, Step 2-4):
    SRT, embedded ASS, Matroska embedded fonts, the font cache, seek/flush and
    continuous playback.
-3. Append the device, iOS version, install method and both results to
+3. Prove the whole-unit fallback: the payload resolves a unit's symbols through
+   `dlsym` and publishes `OLD` when a lookup or the identity check fails, so an
+   artifact that keeps the patch but loses the dylib must behave exactly like
+   the baseline. Build one by removing the selected dylib from a patched IPA -
+   the main is untouched, so this isolates the missing dylib:
+
+   ```sh
+   uv run npa-patch --dylibs-dir build -o build/accept/full.ipa "<clean IPA>"
+   rm -rf build/accept/fallback-tree
+   unzip -q build/accept/full.ipa -d build/accept/fallback-tree
+   rm build/accept/fallback-tree/Payload/nPlayer.app/Frameworks/LibFFmpegFullBridge.dylib
+   (cd build/accept/fallback-tree && zip -q -r -y ../full-fallback.ipa Payload)
+   ```
+
+   `unzip -p build/accept/full-fallback.ipa Payload/nPlayer.app/nPlayer |
+   shasum -a 256` must still print the packaged main of the unmodified patch.
+   On the device, play the same material as the pass above (a 10-bit HEVC /
+   Matroska file, thumbnails, and an AirPlay cast): it must work, and the app
+   must be using its own FFmpeg 4.4.5 for all 110 entry points. Reading the
+   three unit state words under PlayCover is the stronger form - each must read
+   3 (`OLD`) and playback must be unchanged. A Frida attach reads them without
+   elevation: the state words sit in `__NPATCH_DATA` at the installed binary's
+   segment RVA plus each unit's offset from the manifest, and the 2026-09-27
+   pass recorded them that way (unit offsets `0x0`, `0x80`, `0x3a0`, `0x3d0`
+   for the default selection). The identity arm of the check (a
+   dylib at the right path exporting the right symbols) is pinned by
+   `tests/test_payload.py`, not constructible as an artifact, because the load
+   path and the expected basename both come from the same manifest field.
+4. Append the device, iOS version, install method and both results to
    `acceptance.json`.
 
 The expected packaged main hashes after the 2026-09-26 fixes are
@@ -61,11 +89,17 @@ default selection) are void: those payloads never activated the bridge (see
 `acceptance.json`).
 
 For the `ffmpeg-core` unit the matrix is wider than for libass: every container
-the app supports, the network paths (http, https, HLS, rtmp), the recording path
-(muxers, encoders and bitstream filters), the audio formats FFmpeg decodes, AV1
+the app supports, the network paths (http, https, HLS and rtmp; rtmps and rtsp
+have no source available here and are recorded as uncorroborated), the mux/encode
+path (muxers, encoders and bitstream filters), which AirPlay and Chromecast reach
+through the HLS transcode/mux session for a local non-mp4 source while the
+digital-audio passthrough setting and MJPEG covers reach the muxer and encoder -
+see `notes/ida-investigation-7-mux-encode-entry.md` - the audio formats FFmpeg
+decodes, AV1
 - which this build decodes through libdav1d alone - a software video fallback,
 and 10-bit sources (P010/HEVC), which the first device run proved the swscale
-shims had to translate. When a pin changes, rebuild, re-run the component
+shims had to translate and which the all-4.4.8 dylib now handles with no
+translation at all. When a pin changes, rebuild, re-run the component
 comparison in `dev/ffmpeg-core-enable-set.md` against the app's own FFmpeg and
 re-check the offsets asserted in `bridge/ffmpeg-core-abi.h`.
 
