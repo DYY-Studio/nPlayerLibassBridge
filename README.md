@@ -167,8 +167,12 @@ For the same input the libass-only patch produces a main whose SHA-256 is
 `e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`, the
 FFmpeg-only patch
 `a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`, and the
-default selection
-`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`.
+libass+ffmpeg selection
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`. With the
+`ffmpeg-core` unit in the selection the default, which installs all three units,
+is
+`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`; the two
+anchors above are unchanged by the extra unit.
 
 ## Troubleshooting
 

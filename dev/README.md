@@ -50,10 +50,15 @@ The expected packaged main hashes after the 2026-09-26 fixes are
 `e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe` for
 `--dylib libass`, `a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`
 for `--dylib ffmpeg` and
-`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810` for the
-default selection. The pre-fix value
-`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` is void: that
-payload never activated the bridge (see `acceptance.json`).
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810` for
+libass + ffmpeg. With the `ffmpeg-core` unit in the selection the default, which
+installs all three units, is
+`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`, and the two
+anchors above are unchanged by the extra unit. The pre-fix values
+(`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` and
+`4d7e79ba3d2a6a1afaa68948002ee3da36ed9c33cf1e7801df122539572b2272` for the
+default selection) are void: those payloads never activated the bridge (see
+`acceptance.json`).
 
 For the `ffmpeg-core` unit the matrix is wider than for libass: every container
 the app supports, the network paths (http, https, HLS, rtmp), the recording path
