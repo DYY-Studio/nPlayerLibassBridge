@@ -19,7 +19,7 @@ from zipfile import ZipFile
 
 import lief
 
-from .manifest import Manifest, Unit, encode_bl
+from .manifest import Manifest, Unit, branch_opcode, encode_branch
 from .payload import PayloadLayout, assemble_payload, data_size, measure_payload
 from .target_abi import TargetABI
 
@@ -251,11 +251,11 @@ def preflight(
     for unit in units:
         for api in unit.apis:
             for site in api.call_sites:
-                expected = encode_bl(site, api.old_target)
                 actual = _word(binary, site)
+                expected = encode_branch(branch_opcode(actual), site, api.old_target)
                 if actual != expected:
                     raise ValueError(
-                        f"call site {site:#x} does not call {api.old_target:#x}: "
+                        f"call site {site:#x} does not branch to {api.old_target:#x}: "
                         f"{actual:#010x} != {expected:#010x}"
                     )
 
@@ -351,8 +351,8 @@ def write_equal_length(buffer: bytearray, offset: int, payload: bytes) -> None:
     buffer[offset:end] = payload
 
 
-def patch_bl(site: int, target: int) -> bytes:
-    return struct.pack("<I", encode_bl(site, target))
+def patch_branch(opcode: int, site: int, target: int) -> bytes:
+    return struct.pack("<I", encode_branch(opcode, site, target))
 
 
 def phase_b(
@@ -396,12 +396,12 @@ def phase_b(
         for api in unit.apis:
             for site in api.call_sites:
                 offset = int(binary.virtual_address_to_offset(site))
-                original = encode_bl(site, api.old_target)
                 actual = struct.unpack_from("<I", buffer, offset)[0]
-                if actual != original:
-                    raise ValueError(f"call site {site:#x} is no longer the frozen BL")
+                opcode = branch_opcode(actual)
+                if actual != encode_branch(opcode, site, api.old_target):
+                    raise ValueError(f"call site {site:#x} is no longer the frozen branch")
                 target = payload.symbols[f"veneer_{api.symbol}"]
-                write_equal_length(buffer, offset, patch_bl(site, target))
+                write_equal_length(buffer, offset, patch_branch(opcode, site, target))
                 writes.append((offset, 4))
     extra_sites = selected_extra_sites(manifest, units)
     for extra in extra_sites:

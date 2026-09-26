@@ -6,12 +6,14 @@
   },
   "invalidated": [
     "Every result recorded before 2026-09-26 was produced with a dispatch payload that never activated: the dladdr result check was inverted (success was treated as failure) and the basename scan stopped at the first slash, so each unit state stayed OLD and the app always rendered through its bundled libass 0.13.7. Any 'state NEW' in those notes was an assumption, never a runtime measurement -- the only device evidence was that subtitles rendered, which the silent fallback satisfies as well.",
-    "The packaged-main SHA-256 values those entries quote (19d3447..., fb6013ca..., 24c940a6...) belong to the broken payload and no longer reproduce. They are kept below only as history."
+    "The packaged-main SHA-256 values those entries quote (19d3447..., fb6013ca..., 24c940a6...) belong to the broken payload and no longer reproduce. They are kept below only as history.",
+    "the `ffmpeg-core` unit is affected by the same pre-fix payload, so the AV1, container, decode, https and snapshot observations recorded for it describe the app's own FFmpeg 4.4.5. The https conclusion in `dev/ffmpeg-core-enable-set.md` and in the `ffmpeg-core-multiunit` entry was not experimentally established when it was written; the gap was measured live afterwards and is recorded by the `tls-fix` and `ffmpeg-core-multiunit-rerun` entries"
   ],
   "reproducibility": [
     "the patched main for a given dylib selection is byte-stable. After the 2026-09-26 dispatch fix the anchors are: `--dylib libass` -> e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe, `--dylib ffmpeg` -> a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b, libass + ffmpeg -> 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810",
     "the bridge dylibs themselves are NOT byte-reproducible: `make deps` rebuilds the static closures from scratch and the resulting archives (and therefore the linked dylibs) differ on every run. The contract for a shipped dylib is its verification report (exports, install name, dependencies, no initializers, no host paths), not a hash",
-    "the IPA sha256 is not a stable anchor: the zip records file mtimes, so re-patching the same input yields a different artifact digest while packaged_main_sha256 and the dylib hashes stay the same. Use packaged_main_sha256 for regression anchors."
+    "the IPA sha256 is not a stable anchor: the zip records file mtimes, so re-patching the same input yields a different artifact digest while packaged_main_sha256 and the dylib hashes stay the same. Use packaged_main_sha256 for regression anchors.",
+    "adding the `ffmpeg-core` unit extends the anchors: `--dylib libass` stays e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe and libass + ffmpeg stays 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810, while the three-unit selection (libass + ffmpeg + ffmpeg-core) is 638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78"
   ],
   "results": [
     {
@@ -109,6 +111,72 @@
         "the slight HDR tone-mapping difference is expected: the app never calls sws_setColorspaceDetails and routes its own Color Space setting only to the renderer/display layer, so HDR conversion uses swscale 9.0.2's own defaults instead of 4.4.5's. Same class of accepted pixel-level difference as the libass 0.13 to 0.17 rendering change",
         "packaged main sha256 a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b (ffmpeg only) and 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810 (both); shipped LibFFmpegBridge.dylib 249831a185bf4f306589e781b2de87c55398493ef3327c625d0853cfa02ebd6e. The full suite (73 tests, 224 subtests) passes",
         "this is the first time the ffmpeg unit is actually exercised: every earlier ffmpeg entry above fell back to the app's own 4.4.5"
+      ]
+    },
+    {
+      "variant": "tls-fix",
+      "result": "pass",
+      "notes": [
+        "symptom on the device, three-unit selection only: an https M3U8 HLS does not play - the hardware decode path fails and falls back, the software path shows no duration or other stream data. The QuickTime engine connects (the Apple stack has its own TLS). The libass+ffmpeg selection plays the same stream, because it keeps the app's own FFmpeg",
+        "isolation on the same artifact and source: the same HLS over http plays, and an https direct URL plays (that path goes through the app's curl stack, not FFmpeg). Together with the enable-set comparison - whose only app-side capability the unit lacked was TLS - this pins the failure to the missing TLS backend",
+        "root cause: the unit was configured with --disable-autodetect and no TLS option, so CONFIG_TLS_PROTOCOL and CONFIG_HTTPS_PROTOCOL were 0 and libavformat carried no ff_tls_protocol/ff_https_protocol. Any https open through FFmpeg's protocol layer failed with 'https protocol not found', where the app's 4.4.5 (OpenSSL TLS) succeeds",
+        "this corrects the https conclusion recorded for the ffmpeg-core-multiunit artifact, which was measured on the pre-fix payload and therefore described the app's own FFmpeg; the invalidated section already voided that entry",
+        "fix: deps/ffmpeg-core.lock.json configures the closure with --enable-securetransport and adds -framework Security to the system link args (Apple's TLS, no new dependency; the app uses OpenSSL, so the backend differs by design). config.h now reads CONFIG_TLS_PROTOCOL 1, CONFIG_HTTPS_PROTOCOL 1, CONFIG_SECURETRANSPORT 1, and libavformat.a carries tls.o and tls_securetransport.o with ff_tls_protocol and ff_https_protocol",
+        "evidence: make verify 21/21 (the dylib's dependencies stay on system frameworks), uv run pytest 75 passed / 1621 subtests, dev/tests 7 passed. Packaged main is unchanged for every selection; signed dylib sha256: LibFFmpegCoreBridge eb07d4fdf056ecf702d6cac0b29fbf8ebc7d445b33ecccdcb15a96f10f6b857c -> ca99bbe3f25e50852d7f1b5fb03fed326ba9f848f76175e17a17ecdec8e1e7bb, LibASSBridge and LibFFmpegBridge unchanged",
+        "still open (rtmps): the same backend serves rtmps, but no rtmps stream was reported in this pass. SecureTransport is a different implementation than the app's OpenSSL (deprecated API, protocol version negotiated by the system, certificates from the system trust store), so its behaviour is measured rather than assumed",
+        "device, 2026-09-26: https HLS passes on the three-unit selection, where it failed before the fix and where the same source over http already passed"
+      ]
+    },
+    {
+      "variant": "ffmpeg-core-multiunit",
+      "result": "invalid",
+      "notes": [
+        "INVALID: every observation recorded here was measured with the pre-fix dispatch, so it describes the app's own FFmpeg 4.4.5 rather than the unit (see the invalidated section). The unit's own device pass is recorded in the `ffmpeg-core-multiunit-rerun` entry below",
+        "clean IPA patched with the default selection; three dylibs weak-loaded, 35 static checks pass",
+        "packaged main sha256 4d7e79ba3d2a6a1afaa68948002ee3da36ed9c33cf1e7801df122539572b2272 (pre-fix payload)",
+        "bridge sha256: LibASSBridge b2db1e1baa7b154d145b6e6bbc6b84928bb1fc348c9c7c68588b63e5b0acc12b, LibFFmpegBridge 075c68cdaf2b0dd5ef9ff5e6755d2d045185c473de378c66bf517d35f4a37af7, LibFFmpegCoreBridge eb07d4fdf056ecf702d6cac0b29fbf8ebc7d445b33ecccdcb15a96f10f6b857c",
+        "this artifact is where the app's statically linked FFmpeg 4.4.5 becomes 4.4.8: libavformat, libavcodec, libavutil and libswresample all come from the unit, so every container is demuxed by it and it is the software decoder of last resort",
+        "the observations recorded at the time - AV1 software decode, the containers, FFmpeg-decoded audio and video, the software fallback, seek, continuous playback, speed change, subtitles, HTTP direct, HLS, snapshots - all belonged to the app's own FFmpeg, and the https conclusion was wrong: the gap was live on the fixed payload, as the `tls-fix` entry records"
+      ]
+    },
+    {
+      "variant": "ffmpeg-core-multiunit-rerun",
+      "result": "partial",
+      "notes": [
+        "artifact: the default selection rebuilt after the three fixes. Packaged main 638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78 (unchanged from the dispatch-fix rebuilds); signed dylibs LibASSBridge b2db1e1baa7b154d145b6e6bbc6b84928bb1fc348c9c7c68588b63e5b0acc12b, LibFFmpegBridge e1b8f3d1571f3d3274c08d6c0872bff8086d16fabbac268c213b7643e9467b51, LibFFmpegCoreBridge ca99bbe3f25e50852d7f1b5fb03fed326ba9f848f76175e17a17ecdec8e1e7bb",
+        "device-verified in this pass: https HLS playback (what the TLS fix targets), P010/HEVC on both decode paths - hardware and software (what the pixfmt fix targets), AV1 software decode through libdav1d, and audio decode",
+        "also device-verified in the same session: the subtitle matrix (SRT, embedded ASS, Matroska embedded fonts, the font cache), the containers mkv/webm, mp4, mpeg, ts and wmv, software decode of mpeg1/vp8/wmv3, continuous playback, seek, thumbnails and speed change",
+        "liveness: for the ffmpeg and ffmpeg-core units the evidence is behavioural - the swscale, libavformat and libavcodec paths were demonstrably live when they failed (P010, https), and both fixes only take effect inside those units. For libass the subtitle matrix alone would not settle it (the bundled 0.13.7 renders the same subtitles), so the user ran the \\kt probe - behaviour that only 0.17 has and 0.13.7 ignores - and saw the 0.17 behaviour. All three units are therefore confirmed live on this artifact",
+        "not measured in this pass: the recording/mux path (the HLS session muxers, encoders and bitstream filters), rtmps/rtsp, the whole-unit fallback proof, and the explicit state-word read (liveness above is behavioural, not a read of the state word). The entries that used to carry the older items are marked invalid above",
+        "result is partial rather than pass: the fixes and the whole playback matrix pass, but the fallback proof and the recording path are A5 criteria and are still open"
+      ]
+    },
+    {
+      "variant": "ffmpeg-full",
+      "result": "partial",
+      "notes": [
+        "artifact: the default selection, libass plus LibFFmpegFullBridge.dylib. Packaged main f22d7af623272032e3c529b0cfc0e1b9340b42e310756f6b817f438e57f6758a; signed dylib hashes are not recorded because the dylib bytes are not reproducible (see the reproducibility section), and the packaged main is the anchor",
+        "what the dylib changes: it is the whole FFmpeg the app links, at 4.4.8, in one dylib, so sws_*/swr_* run on 4.4.8 instead of the 9.0.2 of the ffmpeg unit. The legacy AVPixelFormat translation the 9.0.2 shims needed is absent from this path, because 4.4.5 and 4.4.8 number the enum identically",
+        "device-verified in this pass: P010/HEVC normal on the default selection. This is the row the pixfmt fix targeted, so here it shows the path needs no format translation at all rather than that a translation is correct",
+        "mux/encode: entry known, and AirPlay passes on this artifact (user-reported, a 10-bit HEVC source with two AC3 tracks in Matroska). That source cannot take the proxy path - Matroska is neither mp4 nor webm, and the HEVC branch of canPassthru forces the value to 0 (notes/ida-investigation-7-mux-encode-entry.md 2.3) - so the HLS session ran the transcode + mux loop: demux, the h264_mp4toannexb bitstream filter, the audio either re-encoded to AAC or passed through as AC3 according to the passthrough settings, and the fragmented-MP4 mux with its init segment. The note leaves the rest of the canPassthru bitmap undecoded (its 6.1), so this reads its recorded branches rather than a finished static proof; the behavioural evidence is that the cast plays at all",
+        "the closure carries what those paths need: the hls, mpegts, mov and spdif muxers, the AAC and MJPEG encoders, and the h264_mp4toannexb and aac_adtstoasc bitstream filters are each defined and referenced by the format/codec lists (nm on build/deps/ffmpeg-core/lib). The spdif muxer is upstream FFmpeg 4.4.8 (libavformat/spdifenc.c, options spdif_flags/be/dtshd_rate), not an app-private addition; the app's spdif_output.c and dts_spdif_output.c strings belong to the bundled DTS-HD decoder SDK (dtshd-c-decoder), not to libavformat, so the replacement needs no private muxer ported",
+        "not measured in this pass: the rest of the A5 matrix. The ffmpeg-core-multiunit-rerun entry below covers the same core code at the same call sites, but the scaler and resampler differ, and only the P010/HEVC row was reported for this dylib",
+        "not corroborated: SPDIF passthrough (path B), rtmps and rtsp. No device or source available here can corroborate them - SPDIF needs a passthrough-capable output chain, and rtmps/rtsp need those servers - so they are recorded as unavailable rather than failed or unmeasured. The whole-unit fallback proof is in the fallback-full entry",
+        "the split alternative (libass + ffmpeg + ffmpeg-core) stays the artifact accepted by the ffmpeg-core-multiunit-rerun entry",
+        "result is partial rather than pass: the row that distinguishes this dylib passes, but the fallback proof and the recording path are A5 criteria and are still open"
+      ]
+    },
+    {
+      "variant": "fallback-full",
+      "result": "pass",
+      "notes": [
+        "artifact: the same default patch with Frameworks/LibFFmpegFullBridge.dylib removed from the IPA. The main is byte-identical to f22d7af623272032e3c529b0cfc0e1b9340b42e310756f6b817f438e57f6758a, so the only difference is the missing dylib, and LC_LOAD_WEAK_DYLIB @executable_path/Frameworks/LibFFmpegFullBridge.dylib still points at it. PlayCover re-signs on install, so the installed main hashes to c38efd9d5cde085621e5c8dc5430b80c5eca911beb9e0a72cf126bd3addb8f0c there",
+        "how it was read: nPlayer installed under PlayCover on macOS (Apple silicon, iPhone17,2 profile). Frida 17.1.3 attached to the running process without elevation and read the four unit state words from the payload's __NPATCH_DATA segment (rva 0x1fa0000; the per-unit offsets come from the manifest). No state word was inferred from behaviour",
+        "A/B on the same material (a 10-bit HEVC source, two AC3 tracks, embedded ASS, in Matroska, placed in the app's Documents and opened with open -a): with the dylib present all four units read 2 (NEW) - libass, ffmpeg-core, libswscale, libswresample; with the dylib removed the three units it carries read 3 (OLD) while libass, whose own dylib is still installed, stayed 2 (NEW)",
+        "that is the whole-unit fallback: no unit of the failed dylib stayed NEW, so nothing half-migrated, and it is per dylib, so a failure in one never turns off another",
+        "behaviour matches the state words: the app launched, listed the folder (thumbnails reach sws_getContext) and played the file, so the app's own FFmpeg 4.4.5 served all 110 entry points while the subtitle renderer and the audio resampler came from the libass bridge",
+        "the dylib was restored afterwards; the installed Frameworks dylib hashes back to 979c2ae04315b33cf173466783fec1ee76782cf5f342f4cb1145dba0236eb977",
+        "the identity arm of the check - a dylib at the expected path that exports the expected symbols - is not constructible as an artifact, because the load path and the expected basename come from the same manifest field; it is pinned by tests/test_payload.py instead"
       ]
     }
   ]

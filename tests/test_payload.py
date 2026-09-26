@@ -57,7 +57,11 @@ def _two_unit_manifest():
             ),
         ),
     )
-    return replace(MANIFEST, dylibs=MANIFEST.dylibs + (other,))
+    return replace(
+        MANIFEST,
+        dylibs=MANIFEST.dylibs + (other,),
+        default_dylibs=MANIFEST.default_dylibs + ("other",),
+    )
 
 
 def _sign_extend(value, bits):
@@ -130,11 +134,17 @@ def _encoded_slot_address(payload, layout, symbol, kind):
         block = payload.symbols[f"new_{symbol}"]
         words = _words_at(payload.text, layout, block, 3)
         adrp, add, access = words
+        adrp_pc = block
     else:
         block = payload.symbols[f"store_{symbol}"]
         words = _words_at(payload.text, layout, block, 4)
         adrp, add, access = words[1], words[2], words[3]
-    return _adrp_target(adrp, block) + _add_immediate(add) + _unsigned_offset(access)
+        # adrp is pc-relative: its own address decides the page, and a block
+        # that straddles a page boundary puts it on the next one.
+        adrp_pc = block + 4
+    return (
+        _adrp_target(adrp, adrp_pc) + _add_immediate(add) + _unsigned_offset(access)
+    )
 
 
 def _basename_occurrences(immediates, basename):
