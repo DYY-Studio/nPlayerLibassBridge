@@ -21,6 +21,15 @@ BRIDGE = BUILD / "LibASSBridge.dylib"
 BASENAME = "LibASSBridge.dylib"
 # the main member of the device-accepted bridge.ipa, signed under the name nPlayer
 PACKAGED_MAIN_SHA256 = "e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe"
+# the default selection: libass plus the whole FFmpeg 4.4.8 in one dylib
+FULL_PACKAGED_MAIN_SHA256 = (
+    "f22d7af623272032e3c529b0cfc0e1b9340b42e310756f6b817f438e57f6758a"
+)
+# the split alternative: libass plus core 4.4.8 plus the 9.0.2 scaler/resampler,
+# i.e. the three-unit artifact the bridge was device-accepted on
+SPLIT_PACKAGED_MAIN_SHA256 = (
+    "638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78"
+)
 
 
 def _patched(source, output, work, **keywords):
@@ -96,11 +105,28 @@ class PatchFlowTests(unittest.TestCase):
                 self.assertEqual(
                     names.count(f"{package.APP_DIR}/Frameworks/{basename}"), 1
                 )
-            self.assertNotEqual(
-                result.packaged_main_sha256, PACKAGED_MAIN_SHA256
+            self.assertEqual(
+                result.packaged_main_sha256, FULL_PACKAGED_MAIN_SHA256
             )
         finally:
             expected.unlink(missing_ok=True)
+
+    def test_split_selection_matches_the_device_accepted_anchor(self):
+        output = self.work / "split.ipa"
+        output.unlink(missing_ok=True)
+        try:
+            result = _patched(
+                SOURCE_IPA,
+                output,
+                self.work / "split",
+                dylibs=["libass", "ffmpeg", "ffmpeg-core"],
+            )
+            self.assertEqual(result.dylibs, ("libass", "ffmpeg", "ffmpeg-core"))
+            self.assertEqual(
+                result.packaged_main_sha256, SPLIT_PACKAGED_MAIN_SHA256
+            )
+        finally:
+            output.unlink(missing_ok=True)
 
     def test_conflicting_dylibs_are_rejected(self):
         output = self.work / "conflict.ipa"
