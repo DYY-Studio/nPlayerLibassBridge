@@ -185,6 +185,17 @@ is
 `638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`; the two
 anchors above are unchanged by the extra unit.
 
+The `ffmpeg-core` unit is live on the same artifacts. Its code paths were
+demonstrably running when they failed - the P010/HEVC crash and the https failure
+above are only reachable inside that unit - and after the two fixes the default
+selection passes https HLS, P010/HEVC on the hardware and the software decode
+path, AV1 software decode through libdav1d, audio, the containers mkv/webm, mp4,
+mpeg, ts and wmv, software decode of mpeg1/vp8/wmv3, continuous playback, seek,
+thumbnails and speed change; the subtitle matrix, with the `\kt` probe, shows the
+libass unit itself live in the same run. What remains open is the recording/mux
+path, rtmps/rtsp and the whole-unit fallback proof; `dev/acceptance.json` records
+the artifact and the full list.
+
 ## Troubleshooting
 
 | Message | Cause | Fix |

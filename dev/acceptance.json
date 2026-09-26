@@ -126,6 +126,30 @@
         "still open (rtmps): the same backend serves rtmps, but no rtmps stream was reported in this pass. SecureTransport is a different implementation than the app's OpenSSL (deprecated API, protocol version negotiated by the system, certificates from the system trust store), so its behaviour is measured rather than assumed",
         "device, 2026-09-26: https HLS passes on the three-unit selection, where it failed before the fix and where the same source over http already passed"
       ]
+    },
+    {
+      "variant": "ffmpeg-core-multiunit",
+      "result": "invalid",
+      "notes": [
+        "INVALID: every observation recorded here was measured with the pre-fix dispatch, so it describes the app's own FFmpeg 4.4.5 rather than the unit (see the invalidated section). The unit's own device pass is recorded in the `ffmpeg-core-multiunit-rerun` entry below",
+        "clean IPA patched with the default selection; three dylibs weak-loaded, 35 static checks pass",
+        "packaged main sha256 4d7e79ba3d2a6a1afaa68948002ee3da36ed9c33cf1e7801df122539572b2272 (pre-fix payload)",
+        "bridge sha256: LibASSBridge b2db1e1baa7b154d145b6e6bbc6b84928bb1fc348c9c7c68588b63e5b0acc12b, LibFFmpegBridge 075c68cdaf2b0dd5ef9ff5e6755d2d045185c473de378c66bf517d35f4a37af7, LibFFmpegCoreBridge eb07d4fdf056ecf702d6cac0b29fbf8ebc7d445b33ecccdcb15a96f10f6b857c",
+        "this artifact is where the app's statically linked FFmpeg 4.4.5 becomes 4.4.8: libavformat, libavcodec, libavutil and libswresample all come from the unit, so every container is demuxed by it and it is the software decoder of last resort",
+        "the observations recorded at the time - AV1 software decode, the containers, FFmpeg-decoded audio and video, the software fallback, seek, continuous playback, speed change, subtitles, HTTP direct, HLS, snapshots - all belonged to the app's own FFmpeg, and the https conclusion was wrong: the gap was live on the fixed payload, as the `tls-fix` entry records"
+      ]
+    },
+    {
+      "variant": "ffmpeg-core-multiunit-rerun",
+      "result": "partial",
+      "notes": [
+        "artifact: the default selection rebuilt after the three fixes. Packaged main 638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78 (unchanged from the dispatch-fix rebuilds); signed dylibs LibASSBridge b2db1e1baa7b154d145b6e6bbc6b84928bb1fc348c9c7c68588b63e5b0acc12b, LibFFmpegBridge e1b8f3d1571f3d3274c08d6c0872bff8086d16fabbac268c213b7643e9467b51, LibFFmpegCoreBridge ca99bbe3f25e50852d7f1b5fb03fed326ba9f848f76175e17a17ecdec8e1e7bb",
+        "device-verified in this pass: https HLS playback (what the TLS fix targets), P010/HEVC on both decode paths - hardware and software (what the pixfmt fix targets), AV1 software decode through libdav1d, and audio decode",
+        "also device-verified in the same session: the subtitle matrix (SRT, embedded ASS, Matroska embedded fonts, the font cache), the containers mkv/webm, mp4, mpeg, ts and wmv, software decode of mpeg1/vp8/wmv3, continuous playback, seek, thumbnails and speed change",
+        "liveness: for the ffmpeg and ffmpeg-core units the evidence is behavioural - the swscale, libavformat and libavcodec paths were demonstrably live when they failed (P010, https), and both fixes only take effect inside those units. For libass the subtitle matrix alone would not settle it (the bundled 0.13.7 renders the same subtitles), so the user ran the \\kt probe - behaviour that only 0.17 has and 0.13.7 ignores - and saw the 0.17 behaviour. All three units are therefore confirmed live on this artifact",
+        "not measured in this pass: the recording/mux path (the HLS session muxers, encoders and bitstream filters), rtmps/rtsp, the whole-unit fallback proof, and the explicit state-word read (liveness above is behavioural, not a read of the state word). The entries that used to carry the older items are marked invalid above",
+        "result is partial rather than pass: the fixes and the whole playback matrix pass, but the fallback proof and the recording path are A5 criteria and are still open"
+      ]
     }
   ]
 }
