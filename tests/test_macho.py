@@ -66,13 +66,12 @@ class MachOTests(unittest.TestCase):
 
     def test_phase_a_freezes_the_payload_segments(self):
         report = self.phase_a_report
-        self.assertEqual(report["reserved_text"], 70656)
+        self.assertEqual(report["reserved_text"], 71184)
         self.assertEqual(
-            [name for name, _ in report["dylib_ordinals"][-3:]],
+            [name for name, _ in report["dylib_ordinals"][-2:]],
             [
                 MANIFEST.dylib("libass").path,
-                MANIFEST.dylib("ffmpeg").path,
-                MANIFEST.dylib("ffmpeg-core").path,
+                MANIFEST.dylib("ffmpeg-full").path,
             ],
         )
         after = parse(self.layout)
@@ -90,7 +89,7 @@ class MachOTests(unittest.TestCase):
         self.assertEqual(before.bind_targets, after.bind_targets)
         self.assertEqual(before.lazy_targets, after.lazy_targets)
         self.assertEqual(before.export_symbols, after.export_symbols)
-        self.assertEqual(before.dylib_ordinals, after.dylib_ordinals[:-3])
+        self.assertEqual(before.dylib_ordinals, after.dylib_ordinals[:-2])
         moved = {
             name
             for name, address in before.segment_vas.items()

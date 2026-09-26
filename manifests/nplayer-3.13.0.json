@@ -15,7 +15,7 @@
   },
   "dlsym_stub": "0x1011362CC",
   "dladdr_stub": "0x10113629C",
-  "default_dylibs": ["libass", "ffmpeg", "ffmpeg-core"],
+  "default_dylibs": ["libass", "ffmpeg-full"],
   "domains": [
     {
       "id": "libass",
@@ -706,7 +706,8 @@
         "include_root": "build/deps/ffmpeg/include",
         "lib_root": "build/deps/ffmpeg/lib"
       },
-      "domains": ["libswscale", "libswresample"]
+      "domains": ["libswscale", "libswresample"],
+      "conflicts": ["ffmpeg-full"]
     },
     {
       "id": "ffmpeg-core",
@@ -719,7 +720,8 @@
         "include_root": "build/deps/ffmpeg-core/include",
         "lib_root": "build/deps/ffmpeg-core/lib"
       },
-      "domains": ["ffmpeg-core"]
+      "domains": ["ffmpeg-core"],
+      "conflicts": ["ffmpeg-full"]
     },
     {
       "id": "ffmpeg-full",
@@ -732,7 +734,8 @@
         "include_root": "build/deps/ffmpeg-core/include",
         "lib_root": "build/deps/ffmpeg-core/lib"
       },
-      "domains": ["ffmpeg-core", "libswscale", "libswresample"]
+      "domains": ["ffmpeg-core", "libswscale", "libswresample"],
+      "conflicts": ["ffmpeg", "ffmpeg-core"]
     }
   ]
 }

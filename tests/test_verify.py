@@ -18,8 +18,7 @@ UNITS = MANIFEST.units()
 BUILD = ROOT / "build" / "macho"
 BRIDGES = {
     "libass": ROOT / "build" / "LibASSBridge.dylib",
-    "ffmpeg": ROOT / "build" / "LibFFmpegBridge.dylib",
-    "ffmpeg-core": ROOT / "build" / "LibFFmpegCoreBridge.dylib",
+    "ffmpeg-full": ROOT / "build" / "LibFFmpegFullBridge.dylib",
 }
 
 
@@ -47,7 +46,7 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(report.state_initial, 0)
         self.assertEqual(
             set(report.bridge_sha256s),
-            {"LibASSBridge.dylib", "LibFFmpegBridge.dylib", "LibFFmpegCoreBridge.dylib"},
+            {"LibASSBridge.dylib", "LibFFmpegFullBridge.dylib"},
         )
         for check in report.checks:
             self.assertTrue(check.ok, check)

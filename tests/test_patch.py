@@ -70,30 +70,28 @@ class PatchFlowTests(unittest.TestCase):
         )
         self.assertTrue(output.is_file())
 
-    def test_default_run_installs_and_names_every_dylib(self):
+    def test_default_run_installs_the_default_selection(self):
         expected = SOURCE_IPA.with_name(
-            f"{SOURCE_IPA.stem}-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8.ipa"
+            f"{SOURCE_IPA.stem}-libass0.17.5-ffmpeg-full4.4.8.ipa"
         )
         expected.unlink(missing_ok=True)
         try:
             result = _patched(SOURCE_IPA, None, self.work / "both")
             self.assertEqual(result.output, expected.resolve())
-            self.assertEqual(result.dylibs, ("libass", "ffmpeg", "ffmpeg-core"))
+            self.assertEqual(result.dylibs, ("libass", "ffmpeg-full"))
             self.assertEqual(result.state_initial, 0)
             self.assertEqual(
                 set(result.bridge_sha256s),
                 {
                     "LibASSBridge.dylib",
-                    "LibFFmpegBridge.dylib",
-                    "LibFFmpegCoreBridge.dylib",
+                    "LibFFmpegFullBridge.dylib",
                 },
             )
             with ZipFile(result.output) as archive:
                 names = archive.namelist()
             for basename in (
                 "LibASSBridge.dylib",
-                "LibFFmpegBridge.dylib",
-                "LibFFmpegCoreBridge.dylib",
+                "LibFFmpegFullBridge.dylib",
             ):
                 self.assertEqual(
                     names.count(f"{package.APP_DIR}/Frameworks/{basename}"), 1
@@ -103,6 +101,19 @@ class PatchFlowTests(unittest.TestCase):
             )
         finally:
             expected.unlink(missing_ok=True)
+
+    def test_conflicting_dylibs_are_rejected(self):
+        output = self.work / "conflict.ipa"
+        output.unlink(missing_ok=True)
+        with self.assertRaises(ValueError) as caught:
+            _patched(
+                SOURCE_IPA,
+                output,
+                self.work / "conflict",
+                dylibs=["ffmpeg-full", "ffmpeg-core"],
+            )
+        self.assertIn("conflicting dylib selection", str(caught.exception))
+        self.assertFalse(output.exists())
 
     def test_unknown_dylib_id_is_rejected(self):
         with self.assertRaises(KeyError) as caught:
@@ -118,7 +129,7 @@ class PatchFlowTests(unittest.TestCase):
         manifest = _manifest_with_an_extra_dylib()
         self.assertEqual(
             patch.default_output_name(SOURCE_IPA, manifest, manifest.units()).name,
-            "nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8-other1.0.0.ipa",
+            "nPlayer_3.13.0-libass0.17.5-ffmpeg-full4.4.8-other1.0.0.ipa",
         )
         self.assertEqual(
             patch.default_output_name(

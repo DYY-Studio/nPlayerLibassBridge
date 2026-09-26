@@ -87,6 +87,7 @@ class Dylib:
     basename: str
     domains: tuple[Domain, ...]
     extra_sites: tuple[ExtraSite, ...] = ()
+    conflicts: tuple[str, ...] = ()
     callback: Callback | None = None
     build: BuildSpec | None = None
 
@@ -158,7 +159,9 @@ class Manifest:
         unknown = [dylib_id for dylib_id in wanted if dylib_id not in known]
         if unknown:
             raise KeyError(f"unknown dylib ids: {', '.join(unknown)}")
-        return tuple(dylib for dylib in self.dylibs if dylib.id in set(wanted))
+        selected = tuple(dylib for dylib in self.dylibs if dylib.id in set(wanted))
+        _check_conflicts(selected)
+        return selected
 
 
 # The app reaches FFmpeg with calls (BL) and with tail calls (B). Both encode a
@@ -213,6 +216,19 @@ def _build_spec(raw: dict | None) -> BuildSpec | None:
     )
 
 
+def _check_conflicts(selected: Sequence[Dylib]) -> None:
+    """Refuse a selection that names two dylibs the manifest marks exclusive."""
+
+    chosen = {dylib.id for dylib in selected}
+    for dylib in selected:
+        clashes = sorted(other for other in dylib.conflicts if other in chosen)
+        if clashes:
+            raise ValueError(
+                f"conflicting dylib selection: {dylib.id} conflicts with "
+                + ", ".join(clashes)
+            )
+
+
 def _domain(raw: dict) -> Domain:
     return Domain(
         id=raw["id"],
@@ -259,6 +275,7 @@ def _dylib(raw: dict, registry: dict[str, Domain]) -> Dylib:
             )
             for site in raw.get("extra_sites", ())
         ),
+        conflicts=tuple(raw.get("conflicts", ())),
         callback=_callback(raw.get("callback")),
         build=_build_spec(raw.get("build")),
     )
@@ -279,6 +296,21 @@ def load_manifest(path: Path) -> Manifest:
         raise ValueError(
             f"default_dylibs names unknown dylibs in {path.name}: {', '.join(unknown)}"
         )
+    by_id = {dylib.id: dylib for dylib in dylibs}
+    for dylib in dylibs:
+        for other in dylib.conflicts:
+            if other not in by_id:
+                raise ValueError(
+                    f"dylib {dylib.id} conflicts with unknown dylib {other}"
+                )
+            if dylib.id not in by_id[other].conflicts:
+                raise ValueError(
+                    f"conflicts are not symmetric in {path.name}: {dylib.id} "
+                    f"names {other}, but {other} does not name {dylib.id}"
+                )
+    _check_conflicts(
+        tuple(dylib for dylib in dylibs if dylib.id in set(default_dylibs))
+    )
     return Manifest(
         imagebase=int(data["imagebase"], 0),
         main_sha256=data["main_sha256"],

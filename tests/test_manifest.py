@@ -73,9 +73,9 @@ class ManifestTests(unittest.TestCase):
             [unit.id for unit in self.units],
             [
                 "libass/libass",
-                "ffmpeg/libswscale",
-                "ffmpeg/libswresample",
-                "ffmpeg-core/ffmpeg-core",
+                "ffmpeg-full/ffmpeg-core",
+                "ffmpeg-full/libswscale",
+                "ffmpeg-full/libswresample",
             ],
         )
         self.assertEqual(self.unit.dylib_id, "libass")
@@ -118,6 +118,30 @@ class ManifestTests(unittest.TestCase):
                 "npa_swr_convert",
                 "npa_swr_free",
             },
+        )
+
+    def test_ffmpeg_alternatives_conflict(self):
+        for combination in (
+            ("ffmpeg-full", "ffmpeg-core"),
+            ("libass", "ffmpeg-full", "ffmpeg"),
+        ):
+            with self.subTest(combination=combination):
+                with self.assertRaises(ValueError) as caught:
+                    self.manifest.units(combination)
+                self.assertIn("conflicting dylib selection", str(caught.exception))
+
+    def test_the_split_alternative_is_still_selectable(self):
+        self.assertEqual(
+            [
+                unit.id
+                for unit in self.manifest.units(("libass", "ffmpeg-core", "ffmpeg"))
+            ],
+            [
+                "libass/libass",
+                "ffmpeg/libswscale",
+                "ffmpeg/libswresample",
+                "ffmpeg-core/ffmpeg-core",
+            ],
         )
 
     def test_shared_domains_are_declared_once(self):
