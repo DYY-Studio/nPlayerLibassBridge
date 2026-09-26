@@ -2,9 +2,10 @@
 
 > A small tribute to nPlayer, an exceptionally well-designed player that has served us reliably for years.
 
-Replace the bundled libass stack in your own **nPlayer 3.13.0** install with
-**libass 0.17.5**, and its scaler/resampler with **FFmpeg 9.0.2** —
-no jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great player.
+Replace the bundled libass stack with
+**libass 0.17.5** and scaler/resampler with **FFmpeg 9.0.2** in your own **nPlayer 3.13.0** install.
+
+No jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great player.
 
 > [!Warning]
 >
@@ -14,14 +15,14 @@ no jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great play
 
 `npa-patch` takes a decrypted nPlayer IPA you own and writes a patched copy:
 
-- two existing guards are turned into NOPs, which fixes that only ASS/SSA of 
+- **two** existing guards are turned into NOPs, which fixes that only ASS/SSA of 
   the first video in the playback sequence can use font attachments in Container (e.g. Matroska).
-- the fifteen libass entry points the app calls are redirected through a small
+- the **fifteen** libass entry points the app calls are redirected through a small
   payload, which loads `LibASSBridge.dylib` on first use and falls back to the
   app's own libass if that ever fails, 
-- the nineteen `sws_*`/`swr_*` entry points are redirected the same way to
+- the **nineteen** `sws_*`/`swr_*` entry points are redirected the same way to
   `LibFFmpegBridge.dylib` (a `--disable-everything` FFmpeg 9.0.2 build of
-  libavutil + libswscale + libswresample), which falls back to the app's own
+  `libavutil + libswscale + libswresample`), which falls back to the app's own
   FFmpeg 4.4 on any failure,
 - `Frameworks/LibASSBridge.dylib` is added. It statically links libass 0.17.5,
   FreeType, **HarfBuzz**, FriBidi, fontconfig and expat, with no third-party
@@ -31,9 +32,12 @@ no jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great play
   else,
 - every binary is pseudo-signed so the bundle loads.
 
-The patch is organised in **units**: one unit per library domain (libass,
-libswscale, libswresample). Each unit arbitrates its own state at first call
-and falls back on its own, so a failure in one never turns off another. A unit
+The patch is organised in **units**: 
+- One unit per library domain (libass,
+libswscale, libswresample). 
+- Each unit arbitrates its own state at first call
+and falls back on its own, so a failure in one never turns off another. 
+- A unit
 is only installed when its dylib is selected, so `npa-patch --dylib libass`
 produces an artifact that is byte-identical to the libass-only patch of the
 same input.
@@ -45,20 +49,20 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 
 ## Requirements
 
-- macOS or Linux, Python ≥ 3.11, [uv](https://docs.astral.sh/uv/), `ldid`, `zip`
-  and `unzip`. Install ldid with `brew install ldid` on macOS; on Linux it is
-  not always packaged (Ubuntu 24.04 does not ship it), so use a
-  [prebuilt binary](https://github.com/ProcursusTeam/ldid/releases) or build it.
-- Your own **decrypted** nPlayer 3.13.0 IPA. App Store packages are
-  FairPlay-encrypted and are rejected on purpose; this project ships no IPA and
-  no decryption.
-- Two host files from the release assets: `LibASSBridge.dylib` (libass 0.17.5
-  for iOS arm64) and `libkeystone.dylib` (the arm64 assembler used to encode the
-  dispatch payload, macOS arm64 only), plus `LibFFmpegBridge.dylib` (FFmpeg
-  9.0.2 for iOS arm64) when you want its units. All are host-side build
-  products; `make bootstrap` builds the assembler and `make bridge` builds both
-  dylibs locally if you prefer that. On Linux, `make bootstrap` builds the
-  assembler as `libkeystone.so` instead.
+- macOS or Linux
+- Python ≥ 3.11, [uv](https://docs.astral.sh/uv/), `ldid`, `zip` and `unzip`. 
+  - macOS: Install ldid with `brew install ldid`
+  - Linux: Use a [prebuilt binary](https://github.com/ProcursusTeam/ldid/releases) or build it yourself.
+- Your own **decrypted** nPlayer 3.13.0 IPA. 
+  - App Store packages are FairPlay-encrypted and are rejected on purpose.
+  - This project ships no IPA and no decryption.
+- Two host files from the release assets. All are host-side build products; 
+  `make bootstrap` builds the assembler and `make bridge` builds both
+  dylibs locally if you prefer that.
+  - `LibASSBridge.dylib` (libass 0.17.5 for iOS arm64)
+  - `LibFFmpegBridge.dylib` (FFmpeg 9.0.2 for iOS arm64) when you want its units. 
+  - `libkeystone.dylib` (the arm64 assembler used to encode the dispatch payload, macOS arm64 only); On Linux, please build the
+  assembler `libkeystone.so` with `make bootstrap` instead.
 - No Xcode, no iOS SDK, no jailbreak. `npa-patch` runs from the repository
   checkout, next to `manifests/`.
 
@@ -73,16 +77,25 @@ uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
 `nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2.ipa`, one `<id><version>` segment per
-installed dylib in manifest order. Install it with your usual sideload tool (
+installed dylib in manifest order. 
+
+Install it with your usual sideload tool (
 [TrollStore](https://github.com/opa334/TrollStore),
 [SideStore](https://github.com/SideStore/SideStore),
 [iloader](https://github.com/nab138/iloader) and more ) or [LiveContainer](https://github.com/LiveContainer/LiveContainer).
 
-Three options exist: `-o/--output`, `--dylib <id>` (repeatable, default: every
-dylib the manifest declares) and `--dylibs-dir <dir>` (default: the working
-directory; each dylib is looked up as `<dir>/<basename>`). `--manifests`
-(default `manifests/`) selects the manifest directory. `./npa-patch` at the
+Options exist: 
+- `-o/--output`
+- `--dylib <id>` (repeatable, default: every
+dylib the manifest declares) 
+- `--dylibs-dir <dir>` (default: the working
+directory; each dylib is looked up as `<dir>/<basename>`).
+-  `--manifests`
+(default `manifests/`) selects the manifest directory. 
+
+`./npa-patch` at the
 repository root and `uv run python tools/patch.py` are equivalent entry points.
+
 The command prints a JSON summary with the input hash, output hashes, one hash
 per shipped dylib, and the number of verification checks that passed.
 
@@ -97,7 +110,9 @@ when the dylib it needs fails to load or fails its identity check.
 
 ## Supported versions
 
-Exactly the nPlayer versions listed in `manifests/`. The input executable is
+Exactly the nPlayer versions listed in `manifests/`. 
+
+The input executable is
 matched by SHA-256 before anything is written, so an unsupported version, an
 already-patched IPA and an encrypted package all fail with a named reason
 instead of producing a broken bundle.
@@ -109,7 +124,9 @@ ABI). That work needs the binary analyzed; see `dev/README.md`.
 
 > [!Warning]
 > Every result recorded before 2026-09-26 was produced with a dispatch payload
-> that never activated: a successful `dladdr` was read as a failure and the
+> that never activated: 
+> 
+> a successful `dladdr` was read as a failure and the
 > basename scan stopped at the first slash, so each unit stayed on the app's own
 > library. Those entries are void; see the `invalidated` section of
 > `dev/acceptance.json`.
@@ -159,16 +176,24 @@ default selection
 
 `deps/sources.lock.json` and `deps/ffmpeg.lock.json` pin every dependency
 (version, archive URL, SHA-256) and `make bootstrap deps bridge` rebuilds both
-closures and both dylibs. `make deps` verifies each closure and refuses a
-surprise fourth archive. That path needs Xcode, cmake, ninja and meson;
+closures and both dylibs. 
+
+`make deps` verifies each closure and refuses a
+surprise fourth archive. 
+
+That path needs `Xcode`, `cmake`, `ninja` and `meson`;
 `dev/README.md` describes it, plus how to re-check the frozen ABI and re-run the
 device acceptance.
 
 ## Legal
 
-This toolchain is MIT licensed (see `LICENSE`); the third-party notices for the
+This toolchain is MIT licensed (see `LICENSE`).
+
+The third-party notices for the
 statically linked libraries are in `THIRD-PARTY.md`. 
 
 The project is not
-affiliated with, or endorsed by, the nPlayer authors. You must own a licence
+affiliated with, or endorsed by, the nPlayer authors. 
+
+You must own a licence
 for nPlayer, and you should patch only your own copy.
