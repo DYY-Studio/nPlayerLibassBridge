@@ -1,6 +1,7 @@
 # Local build and bootstrap outputs
 build/
 .venv/
+.worktrees/
 dist/
 *.ipa
 

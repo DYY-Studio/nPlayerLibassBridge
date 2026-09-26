@@ -52,45 +52,120 @@ EXPECTED_CALL_SITES = frozenset(
 )
 
 
+def _apis(unit):
+    return {api.symbol: api for api in unit.apis}
+
+
 class ManifestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SOURCE_IPA.is_file():
             raise unittest.SkipTest("source IPA is not present")
         cls.manifest = load_manifest(MANIFEST_PATH)
+        cls.units = cls.manifest.units()
+        cls.libass = cls.manifest.dylib("libass")
+        cls.unit = cls.manifest.units(("libass",))[0]
         with ZipFile(SOURCE_IPA) as archive:
             cls.main_bytes = archive.read(MAIN_MEMBER)
 
+    def test_every_unit_is_reachable_from_the_dylib(self):
+        self.assertEqual(
+            [unit.id for unit in self.units],
+            ["libass/libass", "ffmpeg/libswscale", "ffmpeg/libswresample"],
+        )
+        self.assertEqual(self.unit.dylib_id, "libass")
+        self.assertEqual(self.unit.domain_id, "libass")
+        for dylib in self.manifest.dylibs:
+            with self.subTest(dylib=dylib.id):
+                self.assertEqual(
+                    [domain.id for domain in dylib.domains],
+                    [
+                        unit.domain_id
+                        for unit in self.units
+                        if unit.dylib_id == dylib.id
+                    ],
+                )
+                for unit in self.units:
+                    if unit.dylib_id == dylib.id:
+                        self.assertEqual(unit.basename, dylib.basename)
+
+    def test_ffmpeg_units_split_the_legacy_scaler_and_resampler(self):
+        swscale, swresample = (
+            self.manifest.units(("ffmpeg",))[0],
+            self.manifest.units(("ffmpeg",))[1],
+        )
+        self.assertEqual((swscale.symbol_count, swscale.call_site_count), (5, 13))
+        self.assertEqual((swresample.symbol_count, swresample.call_site_count), (6, 7))
+        self.assertEqual(
+            {api.symbol for api in swscale.apis},
+            {
+                "npa_sws_alloc_context",
+                "npa_sws_getContext",
+                "npa_sws_getCachedContext",
+                "npa_sws_scale",
+                "npa_sws_freeContext",
+            },
+        )
+        self.assertEqual(
+            {api.symbol for api in swresample.apis},
+            {
+                "npa_swr_alloc",
+                "npa_swr_alloc_set_opts",
+                "npa_swr_set_matrix",
+                "npa_swr_init",
+                "npa_swr_convert",
+                "npa_swr_free",
+            },
+        )
+
+    def test_unit_ids_are_globally_unique(self):
+        ids = [unit.id for unit in self.units]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_no_call_site_is_shared_between_units(self):
+        owners = {}
+        for unit in self.units:
+            for api in unit.apis:
+                for site in api.call_sites:
+                    with self.subTest(site=site):
+                        self.assertNotIn(site, owners)
+                        owners[site] = unit.id
+
     def test_domain_has_fifteen_unique_apis(self):
-        self.assertEqual(len(self.manifest.apis), 15)
-        self.assertEqual(len({api.symbol for api in self.manifest.apis}), 15)
+        apis = _apis(self.unit)
+        self.assertEqual(len(apis), 15)
+        self.assertEqual(len({api.symbol for api in self.unit.apis}), 15)
 
     def test_domain_contains_exact_api_symbol_set(self):
-        symbols = {api.symbol for api in self.manifest.apis}
+        symbols = {api.symbol for api in self.unit.apis}
         self.assertEqual(symbols, EXPECTED_API_SYMBOLS)
 
     def test_domain_has_sixteen_callsites(self):
-        sites = [site for api in self.manifest.apis for site in api.call_sites]
+        sites = [site for api in self.unit.apis for site in api.call_sites]
         self.assertEqual(len(sites), 16)
 
     def test_domain_contains_exact_unique_callsite_set(self):
-        sites = [site for api in self.manifest.apis for site in api.call_sites]
+        sites = [site for api in self.unit.apis for site in api.call_sites]
         self.assertEqual(len(sites), len(set(sites)))
         self.assertEqual(set(sites), EXPECTED_CALL_SITES)
 
     def test_process_data_has_two_callsites(self):
-        api = self.manifest.api("npa_ass_process_data")
+        api = _apis(self.unit)["npa_ass_process_data"]
         self.assertEqual(api.call_sites, (0x100A0482C, 0x100A0529C))
 
     def test_free_track_has_expected_callsite(self):
-        api = self.manifest.api("npa_ass_free_track")
+        api = _apis(self.unit)["npa_ass_free_track"]
         self.assertEqual(api.call_sites, (0x100A03B40,))
         self.assertEqual(api.old_target, 0x100C0A2F4)
 
     def test_symbol_spellings_are_distinct(self):
-        api = self.manifest.api("npa_ass_library_init")
+        api = _apis(self.unit)["npa_ass_library_init"]
         self.assertEqual(api.dlsym_name, "npa_ass_library_init")
         self.assertEqual(api.macho_name, "_npa_ass_library_init")
+
+    def test_unit_reports_its_counts(self):
+        self.assertEqual(self.unit.symbol_count, 15)
+        self.assertEqual(self.unit.call_site_count, 16)
 
     def test_binary_baseline_metadata(self):
         self.assertEqual(self.manifest.imagebase, 0x100000000)
@@ -101,23 +176,57 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(self.manifest.dlsym_stub, 0x1011362CC)
         self.assertEqual(self.manifest.dladdr_stub, 0x10113629C)
 
-    def test_bridge_and_callback_metadata(self):
+    def test_libass_dylib_metadata(self):
+        self.assertEqual(self.libass.library_version, "0.17.5")
+        self.assertEqual(self.libass.basename, "LibASSBridge.dylib")
         self.assertEqual(
-            self.manifest.bridge_path,
+            self.libass.path,
             "@executable_path/Frameworks/LibASSBridge.dylib",
         )
-        self.assertEqual(self.manifest.expected_bridge_basename, "LibASSBridge.dylib")
-        self.assertEqual(self.manifest.callback.app_callback, 0x100A033C4)
+        self.assertEqual(self.libass.install_name, "@rpath/LibASSBridge.dylib")
         self.assertEqual(
-            self.manifest.callback.prototype,
-            "void(int, const char *, va_list, void *)",
+            [(item.site, item.expected, item.replacement) for item in self.libass.extra_sites],
+            [(0x100A0392C, 0x35000148, 0xD503201F), (0x100ACBC14, 0x37000080, 0xD503201F)],
         )
-        self.assertEqual(self.manifest.callback.va_list_size, 8)
-        self.assertEqual(self.manifest.callback.ignored_argument_register, "x3")
 
-    def test_manifest_declares_the_version_and_the_frozen_abi(self):
+    def test_extra_sites_are_selected_by_dylib(self):
+        self.assertEqual(
+            self.manifest.extra_sites(("libass",)), self.libass.extra_sites
+        )
+        self.assertEqual(self.manifest.extra_sites(("ffmpeg",)), ())
+        self.assertEqual(self.manifest.extra_sites(()), ())
+
+    def test_callback_metadata(self):
+        callback = self.libass.callback
+        self.assertEqual(callback.app_callback, 0x100A033C4)
+        self.assertEqual(callback.prototype, "void(int, const char *, va_list, void *)")
+        self.assertEqual(callback.va_list_size, 8)
+        self.assertEqual(callback.ignored_argument_register, "x3")
+
+    def test_build_spec_points_at_the_libass_closure(self):
+        build = self.libass.build
+        self.assertEqual(build.source, "bridge/npa_ass_bridge.c")
+        self.assertEqual(build.exports, "bridge/bridge.exports")
+        self.assertEqual(build.closure, "build/deps/libass-closure.txt")
+        self.assertEqual(build.include_root, "build/deps/include")
+        self.assertEqual(build.lib_root, "build/deps/lib")
+
+    def test_build_spec_points_at_the_ffmpeg_closure(self):
+        build = self.manifest.dylib("ffmpeg").build
+        self.assertEqual(build.source, "bridge/npa_ffmpeg_util_bridge.c")
+        self.assertEqual(build.exports, "bridge/ffmpeg-util.exports")
+        self.assertEqual(build.closure, "build/deps/ffmpeg-closure.txt")
+        self.assertEqual(build.include_root, "build/deps/ffmpeg/include")
+        self.assertEqual(build.lib_root, "build/deps/ffmpeg/lib")
+        self.assertEqual(self.manifest.dylib("ffmpeg").library_version, "9.0.2")
+        self.assertEqual(
+            self.manifest.dylib("ffmpeg").install_name, "@rpath/LibFFmpegBridge.dylib"
+        )
+        self.assertIsNone(self.manifest.dylib("ffmpeg").callback)
+        self.assertEqual(self.manifest.dylib("ffmpeg").extra_sites, ())
+
+    def test_manifest_declares_the_frozen_abi(self):
         self.assertEqual(self.manifest.app_version, "3.13.0")
-        self.assertEqual(self.manifest.libass_version, "0.17.5")
         self.assertEqual(self.manifest.target_abi.platform.upper(), "IOS")
         self.assertEqual(self.manifest.target_abi.dl_info_size, 32)
         self.assertEqual(
@@ -136,14 +245,15 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(digest, self.manifest.main_sha256)
 
     def test_every_original_bl_word_matches_ipa(self):
-        for api in self.manifest.apis:
-            for call_site in api.call_sites:
-                with self.subTest(symbol=api.symbol, call_site=call_site):
-                    file_offset = call_site - self.manifest.imagebase
-                    actual = int.from_bytes(
-                        self.main_bytes[file_offset : file_offset + 4], "little"
-                    )
-                    self.assertEqual(actual, encode_bl(call_site, api.old_target))
+        for unit in self.units:
+            for api in unit.apis:
+                for call_site in api.call_sites:
+                    with self.subTest(unit=unit.id, symbol=api.symbol, call_site=call_site):
+                        file_offset = call_site - self.manifest.imagebase
+                        actual = int.from_bytes(
+                            self.main_bytes[file_offset : file_offset + 4], "little"
+                        )
+                        self.assertEqual(actual, encode_bl(call_site, api.old_target))
 
 
 if __name__ == "__main__":

@@ -5,8 +5,13 @@
     "install": "LiveContainer 3.7.2 Stable"
   },
   "invalidated": [
-    "Every result recorded before 2026-09-26 was produced with a dispatch payload that never activated: the dladdr result check was inverted (success was treated as failure) and the basename scan stopped at the first slash, so the unit state stayed OLD and the app always rendered through its bundled libass 0.13.7. Any 'state NEW' below was an assumption, never a runtime measurement -- the only device evidence was that subtitles rendered, which the silent fallback satisfies as well.",
-    "The packaged-main SHA-256 values those entries quote (19d3447...) belong to the broken payload and no longer reproduce. They are kept below only as history."
+    "Every result recorded before 2026-09-26 was produced with a dispatch payload that never activated: the dladdr result check was inverted (success was treated as failure) and the basename scan stopped at the first slash, so each unit state stayed OLD and the app always rendered through its bundled libass 0.13.7. Any 'state NEW' in those notes was an assumption, never a runtime measurement -- the only device evidence was that subtitles rendered, which the silent fallback satisfies as well.",
+    "The packaged-main SHA-256 values those entries quote (19d3447..., fb6013ca..., 24c940a6...) belong to the broken payload and no longer reproduce. They are kept below only as history."
+  ],
+  "reproducibility": [
+    "the patched main for a given dylib selection is byte-stable. After the 2026-09-26 dispatch fix the anchors are: `--dylib libass` -> e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe, `--dylib ffmpeg` -> a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b, libass + ffmpeg -> 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810",
+    "the bridge dylibs themselves are NOT byte-reproducible: `make deps` rebuilds the static closures from scratch and the resulting archives (and therefore the linked dylibs) differ on every run. The contract for a shipped dylib is its verification report (exports, install name, dependencies, no initializers, no host paths), not a hash",
+    "the IPA sha256 is not a stable anchor: the zip records file mtimes, so re-patching the same input yields a different artifact digest while packaged_main_sha256 and the dylib hashes stay the same. Use packaged_main_sha256 for regression anchors."
   ],
   "results": [
     {
@@ -47,15 +52,63 @@
       ]
     },
     {
+      "variant": "libass-multiunit",
+      "result": "invalid",
+      "notes": [
+        "INVALID: same silent fallback as `bridge`; the 21 static checks passed but none of them observed the runtime state",
+        "clean IPA re-patched after the multi-dylib refactor with `npa-patch --dylib libass`; 21 static checks pass",
+        "packaged main sha256 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. identical to the accepted `bridge` variant; the payload text region matches byte for byte",
+        "device: SRT, embedded ASS, Matroska embedded fonts, font cache and continuous playback all normal, with the rebuilt LibASSBridge.dylib",
+        "regenerated after the swscale fix; packaged main is still 19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887, i.e. byte-identical to the device-accepted artifact, because the libass unit is untouched by the fix"
+      ]
+    },
+    {
+      "variant": "ffmpeg-multiunit",
+      "result": "invalid",
+      "notes": [
+        "INVALID: the ffmpeg units fell back exactly like libass, so the app kept its own FFmpeg 4.4; the sws_alloc_context work below never ran",
+        "clean IPA patched with `npa-patch --dylib ffmpeg`; 21 static checks pass",
+        "packaged main sha256 fb6013cad491a3548cf55386268f80cdbd794e8ea8cba6ed66b462a595799d55",
+        "the changed-instruction check is exact: only this unit's 20 call sites moved, the two libass NOP guards and all 16 libass call sites are untouched, and only LibFFmpegBridge.dylib is weak-loaded",
+        "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
+        "user re-ran this artifact on the device after the sws_alloc_context fix and reported no visible problems with normal operation (playback, scaling, snapshot, speed change, audio)"
+      ]
+    },
+    {
+      "variant": "multiunit-both",
+      "result": "invalid",
+      "notes": [
+        "INVALID: both units fell back; the 28 static checks passed but none of them observed the runtime state",
+        "clean IPA patched with the default selection (libass + ffmpeg); 28 static checks pass",
+        "packaged main sha256 24c940a6111fda140ce382db9ce49b5a37f8e9c94f746a3eb03da9bf8d91b2a7; both dylibs present exactly once",
+        "includes the sws_alloc_context fix: the libswscale domain now redirects all five sws APIs the app uses (alloc_context/getContext/getCachedContext/scale/freeContext), so media::VideoRendererImpl's context at this+0x98 is allocated, used and freed entirely inside the new library. Before the fix the app's 4.4.5-allocated SwsContext was handed to the new swscale 9.0.2 (out-of-bounds reads and a mismatched free); that path is reached whenever the video render needs scaling or a pixel-format change",
+        "user re-ran this artifact on the device after the sws_alloc_context fix and reported no visible problems with normal operation (playback, scaling, snapshot, speed change, audio)"
+      ]
+    },
+    {
       "variant": "dispatch-fix",
       "result": "pass",
       "notes": [
-        "root cause: `npabridge/payload.py` emitted the dladdr result check as `cbnz w0, publish_old`, but dladdr reports success with a non-zero result, so a successful lookup was treated as a failure; the basename scan also stopped at the first '/', so an absolute dli_fname could never match its basename. Both were present since the first payload commit b146213",
+        "root cause: `npabridge/payload.py` emitted the dladdr result check as `cbnz w0, publish_old`, but dladdr reports success with a non-zero result, so a successful lookup was treated as a failure; the basename scan also stopped at the first '/', so an absolute dli_fname could never match its basename. Both were present since the first payload commit b146213, so the dispatch had never activated",
         "fix: test the dladdr result with CBZ and compare the final path component (the scan reaches the NUL, then steps back over the basename and requires the preceding byte to be '/'). `npabridge.payload` now asserts both shapes on every assembly",
-        "runtime proof: macOS PlayCover, iPhone-SE-class app, installed bundle carrying the fixed payload. Before the fix the libass unit state word read 3 (OLD) while LibASSBridge.dylib was loaded and dlsym returned its symbol; after the fix the unit state word reads 2 (NEW) and every slot holds a bridge address",
+        "runtime proof: macOS PlayCover, iPhone-SE-class app, installed bundle carrying the fixed payload. Before the fix the libass unit state word read 3 (OLD) while LibASSBridge.dylib was loaded and dlsym returned its symbol; after the fix the three unit state words read 2 (NEW) and every slot holds a bridge address",
         "libass 0.17.5 behaviour confirmed visually: the \\kt probe renders the 0.17 karaoke behaviour (libass only added the \\kt override tag in 0.17.0), where the bundled 0.13.7 ignores it",
-        "new packaged-main anchor: e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe; the full suite (48 tests, 63 subtests) passes",
-        "this is a PlayCover run, not yet an iOS-device re-acceptance; the device gate for the fixed artifact is still open"
+        "new packaged-main anchors: libass e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe, libass + ffmpeg 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810; the full suite (71 tests, 168 subtests) passes",
+        "device-confirmed afterwards: the fixed artifact was installed on the device and the \\kt probe renders the 0.17 karaoke behaviour there as well, with state NEW for every unit"
+      ]
+    },
+    {
+      "variant": "pixfmt-fix",
+      "result": "pass",
+      "notes": [
+        "root cause: the app's FFmpeg 4.4 still numbers three AVPixelFormat members that 9.0.2 removed (AV_PIX_FMT_VAAPI_MOCO, AV_PIX_FMT_VAAPI_IDCT, AV_PIX_FMT_XVMC) and they sit inside the enum, so every value from legacy 46 on is shifted (+2 up to 153, +3 after). The swscale shims forwarded the app's value straight through, so AV_PIX_FMT_P010LE (legacy 161) was read by 9.0.2 as AV_PIX_FMT_GBRAP12LE (4 planes, 16-bit)",
+        "symptom before the fix: P010/HEVC folder thumbnails rendered garbage on macOS (lower half green, no crash) and crashed on iOS; 8-bit H.264 was unaffected because NV12 (23), YUV420P (0) and the RGB24 destination (2) are not renumbered",
+        "fix (commit 05423b2): npa_modern_pixfmt() translates src and dst in npa_sws_getContext and npa_sws_getCachedContext. The three dropped members and any value outside the 4.4 enum become AV_PIX_FMT_NONE so sws_getContext fails instead of scaling with a format that means something else. The magic numbers (46, 153, 198 and the dropped-before counts 2 and 3) are named constants documented in the source and the commit message",
+        "redirect coverage re-audited after the sws_alloc_context miss: the app calls only the five redirected swscale entry points and never sws_setColorspaceDetails/sws_getColorspaceDetails/sws_init_context. The unredirected swr_close/swr_is_initialized callers are the embedded Opus decoder using its own 4.4.5 contexts, so no SwrContext crosses between the app wrapper (fully redirected) and libavcodec; see notes/ida-investigation-5-swscale-swr-calls.md",
+        "device result (`--dylib ffmpeg`): P010/HEVC folder thumbnails correct and no crash; continuous playback normal; H.264/AVC unchanged; HDR playback normal; audio normal",
+        "the slight HDR tone-mapping difference is expected: the app never calls sws_setColorspaceDetails and routes its own Color Space setting only to the renderer/display layer, so HDR conversion uses swscale 9.0.2's own defaults instead of 4.4.5's. Same class of accepted pixel-level difference as the libass 0.13 to 0.17 rendering change",
+        "packaged main sha256 a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b (ffmpeg only) and 3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810 (both); shipped LibFFmpegBridge.dylib 249831a185bf4f306589e781b2de87c55398493ef3327c625d0853cfa02ebd6e. The full suite (73 tests, 224 subtests) passes",
+        "this is the first time the ffmpeg unit is actually exercised: every earlier ffmpeg entry above fell back to the app's own 4.4.5"
       ]
     }
   ]

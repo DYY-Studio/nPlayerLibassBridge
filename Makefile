@@ -8,6 +8,7 @@ bootstrap:
 
 deps:
 	$(UV) run python deps/build_deps.py
+	$(UV) run python deps/build_ffmpeg.py
 
 bridge:
 	$(UV) run python -m npabridge.build_bridge
