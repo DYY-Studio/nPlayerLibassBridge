@@ -720,6 +720,19 @@
         "lib_root": "build/deps/ffmpeg-core/lib"
       },
       "domains": ["ffmpeg-core"]
+    },
+    {
+      "id": "ffmpeg-full",
+      "library_version": "4.4.8",
+      "basename": "LibFFmpegFullBridge.dylib",
+      "build": {
+        "source": "bridge/npa_ffmpeg_full_bridge.c",
+        "exports": "bridge/ffmpeg-full.exports",
+        "closure": "build/deps/ffmpeg-core-closure.txt",
+        "include_root": "build/deps/ffmpeg-core/include",
+        "lib_root": "build/deps/ffmpeg-core/lib"
+      },
+      "domains": ["ffmpeg-core", "libswscale", "libswresample"]
     }
   ]
 }
