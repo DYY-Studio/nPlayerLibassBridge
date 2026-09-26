@@ -30,8 +30,8 @@ make verify test
 ```
 
 `deps/sources.lock.json` (libass closure), `deps/ffmpeg.lock.json` (9.0.2
-scaler/resampler) and `deps/ffmpeg-core.lock.json` (4.4.8 core) pin every
-dependency (version, archive URL, SHA-256);
+scaler/resampler) and `deps/ffmpeg-core.lock.json` (the 4.4.8 closure: core,
+scaler and resampler) pin every dependency (version, archive URL, SHA-256);
 the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
 `deps/` is optional for users: the release ships the built `LibASSBridge.dylib`.
 
@@ -51,10 +51,10 @@ The expected packaged main hashes after the 2026-09-26 fixes are
 `--dylib libass`, `a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`
 for `--dylib ffmpeg` and
 `3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810` for
-libass + ffmpeg. With the `ffmpeg-core` unit in the selection the default, which
-installs all three units, is
-`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`, and the two
-anchors above are unchanged by the extra unit. The pre-fix values
+libass + ffmpeg. The default selection, libass plus the whole FFmpeg 4.4.8, is
+`f22d7af623272032e3c529b0cfc0e1b9340b42e310756f6b817f438e57f6758a`; the split
+alternative, libass + ffmpeg-core + ffmpeg, is
+`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`. The pre-fix values
 (`19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` and
 `4d7e79ba3d2a6a1afaa68948002ee3da36ed9c33cf1e7801df122539572b2272` for the
 default selection) are void: those payloads never activated the bridge (see
@@ -72,8 +72,9 @@ re-check the offsets asserted in `bridge/ffmpeg-core-abi.h`.
 ## Release checklist
 
 1. `make bridge` and `make verify`.
-2. Publish `build/LibASSBridge.dylib`, `build/LibFFmpegCoreBridge.dylib` and
-   `libkeystone.dylib` as release assets together with their SHA-256, plus
+2. Publish `build/LibASSBridge.dylib`, `build/LibFFmpegFullBridge.dylib`,
+   `build/LibFFmpegBridge.dylib` and `build/LibFFmpegCoreBridge.dylib`, plus
+   `libkeystone.dylib`, as release assets together with their SHA-256, plus
    `LICENSE` and `THIRD-PARTY.md`. These are host-side products; `make bootstrap`
    reproduces the assembler.
 3. When any pinned dependency version changes, update `THIRD-PARTY.md` and the

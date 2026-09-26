@@ -2,9 +2,10 @@
 
 > A small tribute to nPlayer, an exceptionally well-designed player that has served us reliably for years.
 
-Replace the bundled libass stack with
-**libass 0.17.5**, the scaler/resampler with **FFmpeg 9.0.2** and the FFmpeg core
-the app links with **FFmpeg 4.4.8** in your own **nPlayer 3.13.0** install.
+Replace the bundled libass stack with **libass 0.17.5** and the whole FFmpeg the
+app links with **FFmpeg 4.4.8** in your own **nPlayer 3.13.0** install. A second
+selection keeps the FFmpeg core at 4.4.8 but takes its scaler and resampler from
+**FFmpeg 9.0.2**.
 
 No jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great player.
 
@@ -21,34 +22,41 @@ No jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great play
 - the **fifteen** libass entry points the app calls are redirected through a small
   payload, which loads `LibASSBridge.dylib` on first use and falls back to the
   app's own libass if that ever fails, 
-- the **nineteen** `sws_*`/`swr_*` entry points are redirected the same way to
-  `LibFFmpegBridge.dylib` (a `--disable-everything` FFmpeg 9.0.2 build of
-  `libavutil + libswscale + libswresample`), which falls back to the app's own
-  FFmpeg 4.4 on any failure,
-- the **99** entry points of the FFmpeg core - demuxing, decoding, encoding,
-  muxing and the bitstream filters - go through **one** unit, `ffmpeg-core`,
-  backed by `LibFFmpegCoreBridge.dylib` (FFmpeg 4.4.8, built from the same
-  sources as the app's own 4.4.5 so the two share one ABI),
+- the **110** FFmpeg entry points the app calls - demuxing, decoding, encoding,
+  muxing, the bitstream filters, the scaler and the resampler - are replaced by
+  **one** dylib, `LibFFmpegFullBridge.dylib` (FFmpeg 4.4.8, built from the same
+  sources as the app's own 4.4.5 so the two share one ABI). They go through
+  three units: `ffmpeg-core` for the 99 core entry points, `libswscale` (13
+  call sites) and `libswresample` (7),
+- a second selection splits the same swap across two dylibs:
+  `LibFFmpegCoreBridge.dylib` carries the 99 core entry points at 4.4.8 and
+  `LibFFmpegBridge.dylib` carries the `sws_*`/`swr_*` entry points at **9.0.2**.
+  Both selections cover the same call sites, so they are mutually exclusive and
+  the tool refuses a mix,
 - `Frameworks/LibASSBridge.dylib` is added. It statically links libass 0.17.5,
   FreeType, **HarfBuzz**, FriBidi, fontconfig and expat, with no third-party
   dynamic dependency,
-- `Frameworks/LibFFmpegBridge.dylib` is added when the FFmpeg part is
-  selected. It statically links the three FFmpeg libraries above and nothing
-  else,
-- `Frameworks/LibFFmpegCoreBridge.dylib` is added when the core unit is
-  selected. It statically links libavformat, libavcodec, libavutil and
+- `Frameworks/LibFFmpegFullBridge.dylib` is added for the default selection. It
+  statically links libavformat, libavcodec, libavutil, libswscale and
   libswresample 4.4.8 plus libdav1d 0.9.2, and depends on system libraries and
   frameworks only,
+- `Frameworks/LibFFmpegCoreBridge.dylib` and `Frameworks/LibFFmpegBridge.dylib`
+  are added for the split selection. The first statically links the four 4.4.8
+  libraries plus libdav1d 0.9.2, the second the `--disable-everything` 9.0.2
+  build of libavutil, libswscale and libswresample; both depend on system
+  libraries and frameworks only,
 - every binary is pseudo-signed so the bundle loads.
 
-The patch is organised in **units**: libass, libswscale, libswresample and
-`ffmpeg-core`. Each unit arbitrates its own state at first call and falls back
+The patch is organised in **units**: libass, `ffmpeg-core`, libswscale and
+libswresample. Each unit arbitrates its own state at first call and falls back
 on its own, so a failure in one never turns off another. `ffmpeg-core` is
 deliberately one unit covering libavutil, libavcodec and libavformat together:
 the app reads those structures directly, so half a swap would let one library
-interpret the other's memory. A unit is only installed when its dylib is
-selected, so `npa-patch --dylib libass` produces an artifact that is
-byte-identical to the libass-only patch of the same input.
+interpret the other's memory. The whole-4.4.8 dylib carries all three FFmpeg
+units, so a scaler failure does not take the demuxer with it while the three
+still share one libavutil. A unit is only installed when its dylib is selected,
+so `npa-patch --dylib libass` produces an artifact that is byte-identical to
+the libass-only patch of the same input.
 
 The dylibs are built from this repository; only the patch tooling and those
 dylibs are distributed. No nPlayer IPA is included.
@@ -68,9 +76,11 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
   `make bootstrap` builds the assembler and `make bridge` builds the
   dylibs locally if you prefer that.
   - `LibASSBridge.dylib` (libass 0.17.5 for iOS arm64)
-  - `LibFFmpegBridge.dylib` (FFmpeg 9.0.2 for iOS arm64) when you want its units. 
-  - `LibFFmpegCoreBridge.dylib` (FFmpeg 4.4.8 for iOS arm64) when you want the
-    core unit. 
+  - `LibFFmpegFullBridge.dylib` (FFmpeg 4.4.8 for iOS arm64) for the default
+    selection.
+  - `LibFFmpegBridge.dylib` (FFmpeg 9.0.2 for iOS arm64) and
+    `LibFFmpegCoreBridge.dylib` (FFmpeg 4.4.8 for iOS arm64) when you want the
+    split selection instead.
   - `libkeystone.dylib` (the arm64 assembler used to encode the dispatch payload, macOS arm64 only); On Linux, please build the
   assembler `libkeystone.so` with `make bootstrap` instead.
 - No Xcode, no iOS SDK, no jailbreak. `npa-patch` runs from the repository
@@ -80,13 +90,14 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 
 ```sh
 git clone <this repository> && cd nplayer-libass-bridge
-# put LibASSBridge.dylib, LibFFmpegBridge.dylib, LibFFmpegCoreBridge.dylib
+# put LibASSBridge.dylib, LibFFmpegFullBridge.dylib,
+# LibFFmpegBridge.dylib, LibFFmpegCoreBridge.dylib
 # and libkeystone.dylib from the release assets here
 # (on Linux, run `make bootstrap` to build libkeystone.so instead)
 uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
-`nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8.ipa`, one
+`nPlayer_3.13.0-libass0.17.5-ffmpeg-full4.4.8.ipa`, one
 `<id><version>` segment per installed dylib in manifest order. 
 
 Install it with your usual sideload tool (
@@ -96,8 +107,8 @@ Install it with your usual sideload tool (
 
 Options exist: 
 - `-o/--output`
-- `--dylib <id>` (repeatable, default: every
-dylib the manifest declares) 
+- `--dylib <id>` (repeatable, default: the manifest's `default_dylibs`, which
+  is `libass` and `ffmpeg-full`) 
 - `--dylibs-dir <dir>` (default: the working
 directory; each dylib is looked up as `<dir>/<basename>`).
 -  `--manifests`
@@ -113,10 +124,15 @@ Select exactly what you want:
 
 ```sh
 uv run npa-patch --dylib libass "/path/to/nPlayer_3.13.0.ipa"   # subtitles only
-uv run npa-patch --dylib ffmpeg "/path/to/nPlayer_3.13.0.ipa"   # scaler/resampler only
+# subtitles plus the whole FFmpeg 4.4.8 (the default):
+uv run npa-patch --dylib libass --dylib ffmpeg-full "/path/to/nPlayer_3.13.0.ipa"
+# subtitles plus the 4.4.8 core with the 9.0.2 scaler/resampler instead:
+uv run npa-patch --dylib libass --dylib ffmpeg --dylib ffmpeg-core "/path/to/nPlayer_3.13.0.ipa"
 ```
-A missing or stale dylib is a hard error; a unit only ever falls back at runtime
-when the dylib it needs fails to load or fails its identity check.
+The two FFmpeg selections replace the same call sites, so they cannot be
+combined: naming both fails before anything is written. A missing or stale dylib
+is a hard error; a unit only ever falls back at runtime when the dylib it needs
+fails to load or fails its identity check.
 
 ## Supported versions
 
@@ -179,11 +195,20 @@ For the same input the libass-only patch produces a main whose SHA-256 is
 FFmpeg-only patch
 `a5243f0a36baf5ef5209d51f312bd9d6f0c8d3b05d4053fcbbaa48735339f83b`, and the
 libass+ffmpeg selection
-`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`. With the
-`ffmpeg-core` unit in the selection the default, which installs all three units,
-is
-`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`; the two
-anchors above are unchanged by the extra unit.
+`3bee29d20c4cc6e5979f594dc8df34a6c0fd96e48240e1c2d6a0065fe69be810`. The default
+selection, libass plus the whole FFmpeg 4.4.8, is
+`f22d7af623272032e3c529b0cfc0e1b9340b42e310756f6b817f438e57f6758a`; the split
+alternative, libass with the 4.4.8 core and the 9.0.2 scaler/resampler, is
+`638c00d9602b2797d3f18030ebc6ada4bf825a3f871f2f549374fbdecddcdd78`, the three-unit
+artifact the bridge was device-accepted on. Both selections rewrite the same 485
+call sites plus the two libass NOP guards, so they differ only in which dylibs
+carry the units.
+
+The whole-4.4.8 dylib carries the `ffmpeg-core` code and the scaler/resampler of
+the same closure, so it inherits every core result below; the new part is that
+`sws_*`/`swr_*` now run on 4.4.8 instead of 9.0.2, which is what removes the
+legacy `AVPixelFormat` translation the 9.0.2 shim needed for P010/HEVC. It has
+not had a device pass of its own yet.
 
 The `ffmpeg-core` unit is live on the same artifacts. Its code paths were
 demonstrably running when they failed - the P010/HEVC crash and the https failure
@@ -205,14 +230,15 @@ the artifact and the full list.
 | `bridge.exports` / `bridge.install_name` failed | wrong or stale dylib | use the dylib from the matching release |
 | `bridge dylib for <id> is missing` | the selected dylib is not in `--dylibs-dir` | copy it there or point `--dylibs-dir` at it |
 | `unknown dylib ids: <id>` | typo in `--dylib` | the ids are the manifest's `dylibs[].id` values |
+| `conflicting dylib selection: ...` | `ffmpeg-full` was combined with `ffmpeg`/`ffmpeg-core` | pick one FFmpeg selection; they replace the same call sites |
 | `ldid is required to assemble the IPA` | ldid is not installed | `brew install ldid`, or a prebuilt Linux ldid |
 | `host assembler library is missing` | the host assembler is not in the checkout | run `make bootstrap`, or drop the `libkeystone.dylib` release asset on macOS |
 
 ## Rebuilding from source
 
-`deps/sources.lock.json` and `deps/ffmpeg.lock.json` pin every dependency
-(version, archive URL, SHA-256) and `make bootstrap deps bridge` rebuilds both
-closures and both dylibs. 
+`deps/sources.lock.json`, `deps/ffmpeg.lock.json` and
+`deps/ffmpeg-core.lock.json` pin every dependency (version, archive URL,
+SHA-256) and `make bootstrap deps bridge` rebuilds every closure and dylib. 
 
 `make deps` verifies each closure and refuses a
 surprise fourth archive. 
