@@ -13,6 +13,9 @@ The public flow (`npa-patch`) never touches this directory.
   Run it after an SDK change and compare with the manifest.
 - `acceptance.json` — the recorded device acceptance (iPhone SE 3rd gen,
   iOS 17.7.2, LiveContainer 3.7.2).
+- `ffmpeg-core-enable-set.md` + `tools/enable_set_diff.py` — the comparison of
+  the core unit's FFmpeg component set against the app's own, and the TLS gap
+  it found.
 - `plans/` — the research plan that produced this toolchain.
 - `tests/` — developer tests (dependency closure, Keystone/probe, relinking a
   bridge with an extra export). Run them explicitly: `uv run pytest dev/tests`.
@@ -26,7 +29,9 @@ make bootstrap deps bridge      # host Keystone, iOS dependency closure, bridge 
 make verify test
 ```
 
-`deps/sources.lock.json` pins every dependency (version, archive URL, SHA-256);
+`deps/sources.lock.json` (libass closure), `deps/ffmpeg.lock.json` (9.0.2
+scaler/resampler) and `deps/ffmpeg-core.lock.json` (4.4.8 core) pin every
+dependency (version, archive URL, SHA-256);
 the closure is built with `deps/ios-arm64.cross` and `deps/macos-arm64.native`.
 `deps/` is optional for users: the release ships the built `LibASSBridge.dylib`.
 
@@ -50,12 +55,22 @@ default selection. The pre-fix value
 `19d3447193bcd66e03b850876a1281c4bceac087dd50cf6db534e0527fb3a887` is void: that
 payload never activated the bridge (see `acceptance.json`).
 
+For the `ffmpeg-core` unit the matrix is wider than for libass: every container
+the app supports, the network paths (http, https, HLS, rtmp), the recording path
+(muxers, encoders and bitstream filters), the audio formats FFmpeg decodes, AV1
+- which this build decodes through libdav1d alone - a software video fallback,
+and 10-bit sources (P010/HEVC), which the first device run proved the swscale
+shims had to translate. When a pin changes, rebuild, re-run the component
+comparison in `dev/ffmpeg-core-enable-set.md` against the app's own FFmpeg and
+re-check the offsets asserted in `bridge/ffmpeg-core-abi.h`.
+
 ## Release checklist
 
 1. `make bridge` and `make verify`.
-2. Publish `build/LibASSBridge.dylib` and `libkeystone.dylib` as release assets
-   together with their SHA-256, plus `LICENSE` and `THIRD-PARTY.md`. The two
-   binaries are host-side products; `make bootstrap` reproduces the assembler.
+2. Publish `build/LibASSBridge.dylib`, `build/LibFFmpegCoreBridge.dylib` and
+   `libkeystone.dylib` as release assets together with their SHA-256, plus
+   `LICENSE` and `THIRD-PARTY.md`. These are host-side products; `make bootstrap`
+   reproduces the assembler.
 3. When any pinned dependency version changes, update `THIRD-PARTY.md` and the
    matching `dylibs[].library_version` in the manifest in the same commit.
 4. Run `uv run python dev/abi_probe.py` after an iOS SDK change and re-check

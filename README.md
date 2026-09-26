@@ -3,7 +3,8 @@
 > A small tribute to nPlayer, an exceptionally well-designed player that has served us reliably for years.
 
 Replace the bundled libass stack with
-**libass 0.17.5** and scaler/resampler with **FFmpeg 9.0.2** in your own **nPlayer 3.13.0** install.
+**libass 0.17.5**, the scaler/resampler with **FFmpeg 9.0.2** and the FFmpeg core
+the app links with **FFmpeg 4.4.8** in your own **nPlayer 3.13.0** install.
 
 No jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great player.
 
@@ -24,23 +25,30 @@ No jailbreak, no inline hooks, bring modern ASS/SSA rendering to this great play
   `LibFFmpegBridge.dylib` (a `--disable-everything` FFmpeg 9.0.2 build of
   `libavutil + libswscale + libswresample`), which falls back to the app's own
   FFmpeg 4.4 on any failure,
+- the **99** entry points of the FFmpeg core - demuxing, decoding, encoding,
+  muxing and the bitstream filters - go through **one** unit, `ffmpeg-core`,
+  backed by `LibFFmpegCoreBridge.dylib` (FFmpeg 4.4.8, built from the same
+  sources as the app's own 4.4.5 so the two share one ABI),
 - `Frameworks/LibASSBridge.dylib` is added. It statically links libass 0.17.5,
   FreeType, **HarfBuzz**, FriBidi, fontconfig and expat, with no third-party
   dynamic dependency,
 - `Frameworks/LibFFmpegBridge.dylib` is added when the FFmpeg part is
   selected. It statically links the three FFmpeg libraries above and nothing
   else,
+- `Frameworks/LibFFmpegCoreBridge.dylib` is added when the core unit is
+  selected. It statically links libavformat, libavcodec, libavutil and
+  libswresample 4.4.8 plus libdav1d 0.9.2, and depends on system libraries and
+  frameworks only,
 - every binary is pseudo-signed so the bundle loads.
 
-The patch is organised in **units**: 
-- One unit per library domain (libass,
-libswscale, libswresample). 
-- Each unit arbitrates its own state at first call
-and falls back on its own, so a failure in one never turns off another. 
-- A unit
-is only installed when its dylib is selected, so `npa-patch --dylib libass`
-produces an artifact that is byte-identical to the libass-only patch of the
-same input.
+The patch is organised in **units**: libass, libswscale, libswresample and
+`ffmpeg-core`. Each unit arbitrates its own state at first call and falls back
+on its own, so a failure in one never turns off another. `ffmpeg-core` is
+deliberately one unit covering libavutil, libavcodec and libavformat together:
+the app reads those structures directly, so half a swap would let one library
+interpret the other's memory. A unit is only installed when its dylib is
+selected, so `npa-patch --dylib libass` produces an artifact that is
+byte-identical to the libass-only patch of the same input.
 
 The dylibs are built from this repository; only the patch tooling and those
 dylibs are distributed. No nPlayer IPA is included.
@@ -56,11 +64,13 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 - Your own **decrypted** nPlayer 3.13.0 IPA. 
   - App Store packages are FairPlay-encrypted and are rejected on purpose.
   - This project ships no IPA and no decryption.
-- Two host files from the release assets. All are host-side build products; 
-  `make bootstrap` builds the assembler and `make bridge` builds both
+- The host files from the release assets. All are host-side build products; 
+  `make bootstrap` builds the assembler and `make bridge` builds the
   dylibs locally if you prefer that.
   - `LibASSBridge.dylib` (libass 0.17.5 for iOS arm64)
   - `LibFFmpegBridge.dylib` (FFmpeg 9.0.2 for iOS arm64) when you want its units. 
+  - `LibFFmpegCoreBridge.dylib` (FFmpeg 4.4.8 for iOS arm64) when you want the
+    core unit. 
   - `libkeystone.dylib` (the arm64 assembler used to encode the dispatch payload, macOS arm64 only); On Linux, please build the
   assembler `libkeystone.so` with `make bootstrap` instead.
 - No Xcode, no iOS SDK, no jailbreak. `npa-patch` runs from the repository
@@ -70,14 +80,14 @@ Recommend to use with **nPlayerEnhance**, which unlock ASS/SSA animation framera
 
 ```sh
 git clone <this repository> && cd nplayer-libass-bridge
-# put LibASSBridge.dylib, LibFFmpegBridge.dylib and libkeystone.dylib
-# from the release assets here
+# put LibASSBridge.dylib, LibFFmpegBridge.dylib, LibFFmpegCoreBridge.dylib
+# and libkeystone.dylib from the release assets here
 # (on Linux, run `make bootstrap` to build libkeystone.so instead)
 uv run npa-patch "/path/to/nPlayer_3.13.0.ipa"
 ```
 The output is written next to the input as
-`nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2.ipa`, one `<id><version>` segment per
-installed dylib in manifest order. 
+`nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8.ipa`, one
+`<id><version>` segment per installed dylib in manifest order. 
 
 Install it with your usual sideload tool (
 [TrollStore](https://github.com/opa334/TrollStore),
