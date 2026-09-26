@@ -159,18 +159,23 @@ class ManifestTests(unittest.TestCase):
             self.assertIs(shared, util)
 
     def test_ffmpeg_full_covers_the_whole_4_4_8_surface(self):
-        full = self.manifest.units(("ffmpeg-full",))
+        """The one dylib carries the core, the scaler and the resampler.
+
+        The domain identity is pinned separately; what matters here is that the
+        full dylib's three units are the core, the scaler and the resampler at
+        their frozen sizes, in that order.
+        """
+
         self.assertEqual(
-            [(unit.symbol_count, unit.call_site_count) for unit in full],
-            [(99, 449), (5, 13), (6, 7)],
-        )
-        self.assertEqual(
-            {api.symbol for unit in full for api in unit.apis},
-            {
-                api.symbol
-                for unit in self.manifest.units(("ffmpeg-core", "ffmpeg"))
-                for api in unit.apis
-            },
+            [
+                (unit.domain_id, unit.symbol_count, unit.call_site_count)
+                for unit in self.manifest.units(("ffmpeg-full",))
+            ],
+            [
+                ("ffmpeg-core", 99, 449),
+                ("libswscale", 5, 13),
+                ("libswresample", 6, 7),
+            ],
         )
 
     def test_unit_ids_are_globally_unique(self):

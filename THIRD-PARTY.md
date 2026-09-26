@@ -2,10 +2,11 @@
 
 Each bridge dylib published as a release asset statically links the libraries
 listed for it below. Every one is built from pinned sources recorded in
-`deps/sources.lock.json` (libass closure) or `deps/ffmpeg.lock.json` (FFmpeg
-closure); `dev/README.md` documents how to rebuild the same closures from
-those sources, which is what satisfies the source-availability requirement of
-the LGPL components.
+`deps/sources.lock.json` (libass closure), `deps/ffmpeg.lock.json` (9.0.2
+scaler/resampler) or `deps/ffmpeg-core.lock.json` (the 4.4.8 closure);
+`dev/README.md` documents how to rebuild the same closures from those sources,
+which is what satisfies the source-availability requirement of the LGPL
+components.
 
 No nPlayer code is included or redistributed by this project.
 
@@ -44,8 +45,8 @@ libraries and no GPL part - the app links no libx264 and no libxml2, so neither
 does this closure. zlib, bzlib and iconv are system libraries; dav1d is the only
 bundled one and is what decodes AV1 in this build. The closure also builds
 libswscale, for `LibFFmpegFullBridge.dylib`; this dylib references no `sws_*`
-symbol, so no scaler object is linked into it, and the app's `sws_*` calls
-belong to `LibFFmpegBridge.dylib`.
+symbol, so no scaler object is linked into it, and in the split selection the
+app's `sws_*` calls belong to `LibFFmpegBridge.dylib`.
 
 ## `LibFFmpegFullBridge.dylib`
 

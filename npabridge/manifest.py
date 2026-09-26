@@ -145,10 +145,17 @@ class Manifest:
         )
 
     def api(self, symbol: str) -> APIBinding:
-        for unit in self.units():
-            for api in unit.apis:
-                if api.symbol == symbol:
-                    return api
+        """One API binding by symbol, across every dylib the manifest declares.
+
+        Deliberately not scoped to the default selection: a symbol that only a
+        non-default dylib declares is still part of the manifest.
+        """
+
+        for dylib in self.dylibs:
+            for domain in dylib.domains:
+                for api in domain.apis:
+                    if api.symbol == symbol:
+                        return api
         raise KeyError(symbol)
 
     def _select(self, dylib_ids: Sequence[str] | None) -> tuple[Dylib, ...]:
