@@ -31,6 +31,20 @@ The FFmpeg closure is configured with `--disable-everything` plus
 filter, device or program. No GPL component is enabled, so the LGPL-2.1-or-later
 license above is the one that applies.
 
+## `LibFFmpegCoreBridge.dylib`
+
+| Library | License | Version | Source |
+| --- | --- | --- | --- |
+| FFmpeg (libavformat, libavcodec, libavutil, libswresample) | LGPL-2.1-or-later | 4.4.8 | https://ffmpeg.org/releases/ |
+| dav1d | BSD-2-Clause | 0.9.2 | https://code.videolan.org/videolan/dav1d |
+
+This closure mirrors the FFmpeg the app already carries, which is what makes
+replacing it ABI-safe: same major versions, same components, the same external
+libraries and no GPL part - the app links no libx264 and no libxml2, so neither
+does this closure. zlib, bzlib and iconv are system libraries; dav1d is the only
+bundled one and is what decodes AV1 in this build. libswscale is deliberately
+absent: the app's `sws_*` calls belong to `LibFFmpegBridge.dylib`.
+
 The authoritative license texts are the `COPYING`/`LICENSE` files inside each
 upstream source tree. The versions above are the ones pinned by the dependency
 locks; when a pin changes, this table and the matching `dylibs[].library_version`

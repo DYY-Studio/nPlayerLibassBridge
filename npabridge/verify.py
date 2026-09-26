@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import macho
-from .manifest import Dylib, Manifest, Unit, encode_bl
+from .manifest import BRANCH_OPCODES, Dylib, Manifest, Unit, encode_branch
 from .payload import (
     Payload,
     PayloadLayout,
@@ -41,6 +41,9 @@ FORBIDDEN_DEPENDENCY_STEMS = (
     "libavformat",
     "libavfilter",
 )
+# Where a system dependency may live. Apple frameworks are system too: the
+# ffmpeg-core unit links VideoToolbox and friends for its hardware paths.
+SYSTEM_DEPENDENCY_PREFIXES = ("/usr/lib/", "/System/Library/Frameworks/")
 FORBIDDEN_CALLBACK_TOKENS = ("va_start", "va_end", "va_copy")
 CALLBACK_ARGS = "void(int, const char *, va_list, void *)"
 CALLBACK_PARAMETER = "(*message_cb)(int, const char *, va_list, void *)"
@@ -163,7 +166,10 @@ def _bridge_dependencies(path: Path, dylib: Dylib) -> str:
     external = [item for item in dependencies if item != dylib.install_name]
     _require(bool(external), "bridge has no dynamic dependency")
     for dependency in external:
-        _require(dependency.startswith("/usr/lib/"), f"non-system dependency: {dependency}")
+        _require(
+            dependency.startswith(SYSTEM_DEPENDENCY_PREFIXES),
+            f"non-system dependency: {dependency}",
+        )
         stem = Path(dependency).name.split(".")[0]
         _require(stem not in FORBIDDEN_DEPENDENCY_STEMS, f"static dependency leaked: {dependency}")
     return " ".join(external)
@@ -485,9 +491,12 @@ def _changed_and_patched(
             for site in api.call_sites:
                 offset = int(binary.virtual_address_to_offset(site))
                 veneer = payload.symbols[f"veneer_{api.symbol}"]
-                expected = struct.pack("<I", encode_bl(site, veneer))
+                word = struct.unpack_from("<I", raw, offset)[0]
+                expected = tuple(
+                    encode_branch(opcode, site, veneer) for opcode in BRANCH_OPCODES
+                )
                 _require(
-                    raw[offset : offset + 4] == expected,
+                    word in expected,
                     f"call site {site:#x} is not redirected",
                 )
                 count += 1

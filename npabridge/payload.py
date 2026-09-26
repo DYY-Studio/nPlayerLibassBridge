@@ -12,7 +12,7 @@ import re
 import struct
 from typing import Iterable, Sequence
 
-from .manifest import Manifest, Unit, encode_bl
+from .manifest import BL_OPCODE, Manifest, Unit, encode_branch
 from .target_abi import TargetABI
 from .toolchain import Toolchain
 
@@ -321,6 +321,12 @@ def _veneer_blocks(
             ),
         ),
     ]
+
+
+def _label(name: str) -> str:
+    """A label keystone accepts; see `_assemble_block`."""
+
+    return "".join(char if char.isalnum() or char == "_" else "_" for char in name)
 
 
 def _bootstrap_block(
@@ -700,8 +706,24 @@ def _make_blocks(
     return blocks
 
 
+def _sanitize_labels(source: str) -> str:
+    """Make every emitted label a plain identifier.
+
+    Keystone drops a whole block, without reporting an error, when a label is
+    not a plain identifier: a unit id containing a dash was enough to turn the
+    assembled payload into zero instructions. Labels carry no bytes and no
+    branch targets them (branches use resolved addresses), so rewriting them is
+    safe.
+    """
+
+    return "\n".join(
+        _label(line[:-1]) + ":" if line.endswith(":") else line
+        for line in source.splitlines()
+    )
+
+
 def _assemble_block(toolchain: Toolchain, block: _Block, address: int) -> bytes:
-    source = "\n".join(block.lines) + "\n"
+    source = _sanitize_labels("\n".join(block.lines)) + "\n"
     try:
         return toolchain.assemble(source, address)
     except RuntimeError as error:
@@ -881,7 +903,7 @@ def _validate_callsite_branches(
             for site in api.call_sites:
                 _check_branch(site, veneer, f"callsite {site:#x} -> {api.symbol}")
                 # Re-encode through the same range checker used by the patcher.
-                if encode_bl(site, veneer) & 0xFC000000 != 0x94000000:
+                if encode_branch(BL_OPCODE, site, veneer) & 0xFC000000 != BL_OPCODE:
                     raise ValueError("callsite redirect is not a BL")
 
 
@@ -960,7 +982,7 @@ def _build_payload(
     )
     source = _source_for_blocks(final_blocks, string_lines)
     try:
-        text = toolchain.assemble(source, text_vmaddr)
+        text = toolchain.assemble(_sanitize_labels(source), text_vmaddr)
     except RuntimeError as error:
         raise ValueError(f"failed to assemble final payload: {error}") from error
     if len(text) != text_size:

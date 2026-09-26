@@ -72,21 +72,29 @@ class PatchFlowTests(unittest.TestCase):
 
     def test_default_run_installs_and_names_every_dylib(self):
         expected = SOURCE_IPA.with_name(
-            f"{SOURCE_IPA.stem}-libass0.17.5-ffmpeg9.0.2.ipa"
+            f"{SOURCE_IPA.stem}-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8.ipa"
         )
         expected.unlink(missing_ok=True)
         try:
             result = _patched(SOURCE_IPA, None, self.work / "both")
             self.assertEqual(result.output, expected.resolve())
-            self.assertEqual(result.dylibs, ("libass", "ffmpeg"))
+            self.assertEqual(result.dylibs, ("libass", "ffmpeg", "ffmpeg-core"))
             self.assertEqual(result.state_initial, 0)
             self.assertEqual(
                 set(result.bridge_sha256s),
-                {"LibASSBridge.dylib", "LibFFmpegBridge.dylib"},
+                {
+                    "LibASSBridge.dylib",
+                    "LibFFmpegBridge.dylib",
+                    "LibFFmpegCoreBridge.dylib",
+                },
             )
             with ZipFile(result.output) as archive:
                 names = archive.namelist()
-            for basename in ("LibASSBridge.dylib", "LibFFmpegBridge.dylib"):
+            for basename in (
+                "LibASSBridge.dylib",
+                "LibFFmpegBridge.dylib",
+                "LibFFmpegCoreBridge.dylib",
+            ):
                 self.assertEqual(
                     names.count(f"{package.APP_DIR}/Frameworks/{basename}"), 1
                 )
@@ -110,7 +118,7 @@ class PatchFlowTests(unittest.TestCase):
         manifest = _manifest_with_an_extra_dylib()
         self.assertEqual(
             patch.default_output_name(SOURCE_IPA, manifest, manifest.units()).name,
-            "nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2-other1.0.0.ipa",
+            "nPlayer_3.13.0-libass0.17.5-ffmpeg9.0.2-ffmpeg-core4.4.8-other1.0.0.ipa",
         )
         self.assertEqual(
             patch.default_output_name(

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from zipfile import ZipFile
 
-from npabridge.manifest import encode_bl, load_manifest
+from npabridge.manifest import branch_opcode, encode_branch, load_manifest
 
 from support import SOURCE_IPA
 
@@ -71,7 +71,12 @@ class ManifestTests(unittest.TestCase):
     def test_every_unit_is_reachable_from_the_dylib(self):
         self.assertEqual(
             [unit.id for unit in self.units],
-            ["libass/libass", "ffmpeg/libswscale", "ffmpeg/libswresample"],
+            [
+                "libass/libass",
+                "ffmpeg/libswscale",
+                "ffmpeg/libswresample",
+                "ffmpeg-core/ffmpeg-core",
+            ],
         )
         self.assertEqual(self.unit.dylib_id, "libass")
         self.assertEqual(self.unit.domain_id, "libass")
@@ -253,7 +258,10 @@ class ManifestTests(unittest.TestCase):
                         actual = int.from_bytes(
                             self.main_bytes[file_offset : file_offset + 4], "little"
                         )
-                        self.assertEqual(actual, encode_bl(call_site, api.old_target))
+                        self.assertEqual(
+                            actual,
+                            encode_branch(branch_opcode(actual), call_site, api.old_target),
+                        )
 
 
 if __name__ == "__main__":

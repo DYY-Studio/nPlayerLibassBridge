@@ -5,7 +5,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from npabridge import macho
-from npabridge.manifest import encode_bl, load_manifest
+from npabridge.manifest import BL_OPCODE, encode_branch, load_manifest
 from npabridge.macho import IPA_MEMBER, parse, phase_a, phase_b
 from npabridge.payload import unit_offsets
 from npabridge.verify import VerificationError, verify_artifact, verify_bridge
@@ -19,6 +19,7 @@ BUILD = ROOT / "build" / "macho"
 BRIDGES = {
     "libass": ROOT / "build" / "LibASSBridge.dylib",
     "ffmpeg": ROOT / "build" / "LibFFmpegBridge.dylib",
+    "ffmpeg-core": ROOT / "build" / "LibFFmpegCoreBridge.dylib",
 }
 
 
@@ -46,7 +47,7 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(report.state_initial, 0)
         self.assertEqual(
             set(report.bridge_sha256s),
-            {"LibASSBridge.dylib", "LibFFmpegBridge.dylib"},
+            {"LibASSBridge.dylib", "LibFFmpegBridge.dylib", "LibFFmpegCoreBridge.dylib"},
         )
         for check in report.checks:
             self.assertTrue(check.ok, check)
@@ -57,7 +58,7 @@ class VerifyTests(unittest.TestCase):
         binary = parse(mutated)
         offset = int(binary.virtual_address_to_offset(site))
         raw = bytearray(mutated.read_bytes())
-        raw[offset : offset + 4] = struct.pack("<I", encode_bl(site, 0x100A00000))
+        raw[offset : offset + 4] = struct.pack("<I", encode_branch(BL_OPCODE, site, 0x100A00000))
         mutated.write_bytes(bytes(raw))
         report = verify_artifact(
             self.baseline, mutated, MANIFEST, UNITS, BRIDGES

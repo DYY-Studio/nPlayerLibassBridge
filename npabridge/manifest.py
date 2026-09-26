@@ -160,13 +160,33 @@ class Manifest:
         return tuple(dylib for dylib in self.dylibs if dylib.id in set(wanted))
 
 
-def encode_bl(call_site: int, target: int) -> int:
+# The app reaches FFmpeg with calls (BL) and with tail calls (B). Both encode a
+# displacement the same way but differ in frame behaviour: turning a tail call
+# into a BL would make the callee return into whatever follows the site, so the
+# patcher preserves the opcode the site already had.
+B_OPCODE = 0x14000000
+BL_OPCODE = 0x94000000
+BRANCH_OPCODES = (B_OPCODE, BL_OPCODE)
+
+
+def branch_opcode(word: int) -> int:
+    """The opcode of a B/BL instruction word."""
+
+    opcode = word & 0xFC000000
+    if opcode not in BRANCH_OPCODES:
+        raise ValueError(f"instruction {word:#010x} is neither B nor BL")
+    return opcode
+
+
+def encode_branch(opcode: int, call_site: int, target: int) -> int:
+    if opcode not in BRANCH_OPCODES:
+        raise ValueError("branch opcode must be B or BL")
     displacement = target - call_site
     if call_site & 3 or target & 3:
-        raise ValueError("BL addresses must be 4-byte aligned")
+        raise ValueError("branch addresses must be 4-byte aligned")
     if not -(1 << 27) <= displacement < 1 << 27:
-        raise ValueError("BL displacement is out of range")
-    return 0x94000000 | ((displacement >> 2) & 0x03FFFFFF)
+        raise ValueError("branch displacement is out of range")
+    return opcode | ((displacement >> 2) & 0x03FFFFFF)
 
 
 def _callback(raw: dict | None) -> Callback | None:

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from npabridge import build_bridge, macho
+from npabridge import build_bridge, macho, verify
 from npabridge.manifest import load_manifest
 
 
@@ -99,7 +99,12 @@ class BridgeTests(unittest.TestCase):
             dependencies = macho.dependency_lines(FFMPEG)
         external = [item for item in dependencies if item != "@rpath/LibFFmpegBridge.dylib"]
         self.assertEqual(
-            [item for item in external if not item.startswith("/usr/lib/")], []
+            [
+                item
+                for item in external
+                if not item.startswith(verify.SYSTEM_DEPENDENCY_PREFIXES)
+            ],
+            [],
         )
         self.assertIn("/usr/lib/libSystem.B.dylib", external)
         parsed = macho.parse(FFMPEG)
