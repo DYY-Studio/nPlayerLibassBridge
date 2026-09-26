@@ -6,7 +6,7 @@ Replace the bundled ...
 - libass 0.13.7 stack with **libass 0.17.5**
 - FFmpeg 4.4.5 libs with one of
   1. Full **FFmpeg 4.4.8** 
-  2. Swscale + Swsresample **FFmpeg 9.0.2** + Core **FFmpeg 4.4.8**
+  2. Swscale + Swresample **FFmpeg 9.0.2** + Core **FFmpeg 4.4.8**
 
 ... in your own **nPlayer 3.13.0** install. 
 
