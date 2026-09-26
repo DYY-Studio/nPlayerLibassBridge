@@ -241,7 +241,11 @@ def _manifest_with_an_extra_dylib():
         domains=(Domain(id="other", apis=manifest.dylib("libass").domains[0].apis[:1]),),
         extra_sites=(),
     )
-    return replace(manifest, dylibs=manifest.dylibs + (other,))
+    return replace(
+        manifest,
+        dylibs=manifest.dylibs + (other,),
+        default_dylibs=manifest.default_dylibs + ("other",),
+    )
 
 
 if __name__ == "__main__":

@@ -107,6 +107,7 @@ class Manifest:
     target_abi: target_abi.TargetABI
     dlsym_stub: int
     dladdr_stub: int
+    default_dylibs: tuple[str, ...]
     dylibs: tuple[Dylib, ...]
 
     def units(self, dylib_ids: Sequence[str] | None = None) -> tuple[Unit, ...]:
@@ -151,7 +152,7 @@ class Manifest:
 
     def _select(self, dylib_ids: Sequence[str] | None) -> tuple[Dylib, ...]:
         if dylib_ids is None:
-            return self.dylibs
+            dylib_ids = self.default_dylibs
         wanted = tuple(dict.fromkeys(dylib_ids))
         known = {dylib.id for dylib in self.dylibs}
         unknown = [dylib_id for dylib_id in wanted if dylib_id not in known]
@@ -212,43 +213,72 @@ def _build_spec(raw: dict | None) -> BuildSpec | None:
     )
 
 
+def _domain(raw: dict) -> Domain:
+    return Domain(
+        id=raw["id"],
+        apis=tuple(
+            APIBinding(
+                symbol=api["symbol"],
+                call_sites=tuple(int(value, 0) for value in api["call_sites"]),
+                old_target=int(api["old_target"], 0),
+            )
+            for api in raw["apis"]
+        ),
+    )
+
+
+def _domain_registry(data: dict, path: Path) -> dict[str, Domain]:
+    """The domain definitions, written once and shared by every dylib."""
+
+    registry: dict[str, Domain] = {}
+    for raw in data["domains"]:
+        if raw["id"] in registry:
+            raise ValueError(f"duplicate domain ids in {path.name}: {raw['id']}")
+        registry[raw["id"]] = _domain(raw)
+    return registry
+
+
+def _dylib(raw: dict, registry: dict[str, Domain]) -> Dylib:
+    domains = []
+    for domain_id in raw["domains"]:
+        if domain_id not in registry:
+            raise ValueError(
+                f"dylib {raw['id']} references unknown domain {domain_id}"
+            )
+        domains.append(registry[domain_id])
+    return Dylib(
+        id=raw["id"],
+        library_version=raw["library_version"],
+        basename=raw["basename"],
+        domains=tuple(domains),
+        extra_sites=tuple(
+            ExtraSite(
+                site=int(site["site"], 0),
+                expected=int(site["expected"], 0),
+                replacement=int(site["replacement"], 0),
+            )
+            for site in raw.get("extra_sites", ())
+        ),
+        callback=_callback(raw.get("callback")),
+        build=_build_spec(raw.get("build")),
+    )
+
+
 def load_manifest(path: Path) -> Manifest:
     data = json.loads(path.read_text(encoding="utf-8"))
-    dylibs = tuple(
-        Dylib(
-            id=dylib["id"],
-            library_version=dylib["library_version"],
-            basename=dylib["basename"],
-            domains=tuple(
-                Domain(
-                    id=domain["id"],
-                    apis=tuple(
-                        APIBinding(
-                            symbol=api["symbol"],
-                            call_sites=tuple(int(value, 0) for value in api["call_sites"]),
-                            old_target=int(api["old_target"], 0),
-                        )
-                        for api in domain["apis"]
-                    ),
-                )
-                for domain in dylib["domains"]
-            ),
-            extra_sites=tuple(
-                ExtraSite(
-                    site=int(site["site"], 0),
-                    expected=int(site["expected"], 0),
-                    replacement=int(site["replacement"], 0),
-                )
-                for site in dylib.get("extra_sites", ())
-            ),
-            callback=_callback(dylib.get("callback")),
-            build=_build_spec(dylib.get("build")),
-        )
-        for dylib in data["dylibs"]
-    )
+    registry = _domain_registry(data, path)
+    dylibs = tuple(_dylib(raw, registry) for raw in data["dylibs"])
     identifiers = [dylib.id for dylib in dylibs]
     if len(identifiers) != len(set(identifiers)):
         raise ValueError(f"duplicate dylib ids in {path.name}: {identifiers}")
+    default_dylibs = tuple(data["default_dylibs"])
+    unknown = [
+        dylib_id for dylib_id in default_dylibs if dylib_id not in set(identifiers)
+    ]
+    if unknown:
+        raise ValueError(
+            f"default_dylibs names unknown dylibs in {path.name}: {', '.join(unknown)}"
+        )
     return Manifest(
         imagebase=int(data["imagebase"], 0),
         main_sha256=data["main_sha256"],
@@ -256,6 +286,7 @@ def load_manifest(path: Path) -> Manifest:
         target_abi=target_abi.from_manifest(data["target_abi"]),
         dlsym_stub=int(data["dlsym_stub"], 0),
         dladdr_stub=int(data["dladdr_stub"], 0),
+        default_dylibs=default_dylibs,
         dylibs=dylibs,
     )
 

@@ -151,6 +151,7 @@ class MachOTests(unittest.TestCase):
                     ),
                 ),
             ),
+            default_dylibs=("libass",),
         )
         with self.assertRaises(ValueError) as caught:
             phase_a(
