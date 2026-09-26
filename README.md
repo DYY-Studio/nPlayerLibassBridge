@@ -163,6 +163,17 @@ differs slightly, which is expected: the app never calls
 display layer, so HDR conversion uses swscale 9.0.2's own defaults instead of
 4.4.5's.
 
+The FFmpeg core needed TLS as well, which the app's FFmpeg gets from OpenSSL.
+Without it an https M3U8 did not play on the default selection at all - no
+duration, no stream data, and the hardware decoder failing over to software -
+while the same stream over http played and an https direct URL played through
+the app's curl stack. The closure is now configured with
+`--enable-securetransport` and the dylib links `Security.framework`
+(`deps/ffmpeg-core.lock.json`), so the unit carries `ff_tls_protocol` and
+`ff_https_protocol`. Apple's TLS is a different implementation than the app's
+OpenSSL, so its behaviour is measured rather than assumed: https HLS now passes
+on the device, and rtmps stays on the same open list as the rest of the matrix.
+
 For the same input the libass-only patch produces a main whose SHA-256 is
 `e84ef5b5e10cb10940ecffe73c3509f932a4aa6d2cba053052a7d9e7549792fe`, the
 FFmpeg-only patch
